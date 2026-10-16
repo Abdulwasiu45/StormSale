@@ -6,7 +6,7 @@
 export interface OrderMetadata {
   orderId: string;
   txHash: string; // 64-char hex (e.g. 0x...)
-  affiliateAddress: string;
+  affiliateAddress: string; // Valid 56-char Stellar public key (G...)
   campaignId: string;
   campaignName: string;
   amountXlm: number;
@@ -32,8 +32,8 @@ export interface MerkleNode {
 export interface MerkleProofStep {
   level: number;
   currentHash: string;
-  siblingHash: string;
-  siblingPosition: "left" | "right";
+  siblingHash: string | null;
+  siblingPosition: "left" | "right" | "none";
   computedHash: string;
   expectedHash: string;
   isVerified: boolean;
@@ -52,10 +52,10 @@ export interface MerkleProof {
 export interface SettlementBatch {
   batchId: string;
   campaignName: string;
-  campaignAddress: string;
+  campaignAddress: string; // Valid 56-char Stellar contract ID (C...)
   ledgerSequence: number;
   settledAt: string;
-  contractRootHash: string; // Published root on Soroban escrow contract
+  contractRootHash: string; // Precomputed trusted root on Soroban escrow contract
   orders: OrderMetadata[];
 }
 
@@ -79,9 +79,9 @@ export async function sha256Hex(input: string | Uint8Array): Promise<string> {
 }
 
 /**
- * Minimalist pure JS SHA-256 implementation as a bulletproof fallback
+ * Pure JS SHA-256 implementation used as a fallback and verified against NIST vectors.
  */
-function fallbackSha256(data: Uint8Array): string {
+export function fallbackSha256(data: Uint8Array): string {
   function rightRotate(value: number, amount: number) {
     return (value >>> amount) | (value << (32 - amount));
   }
@@ -202,7 +202,8 @@ export interface MerkleTree {
 }
 
 /**
- * Builds an authentic Merkle Tree from an array of conversion orders.
+ * Builds an authentic Merkle Tree from an array of conversion orders using odd-node promotion.
+ * Eliminates duplicate-node vulnerabilities so [A, B, C] and [A, B, C, C] produce distinct roots.
  */
 export async function buildMerkleTree(orders: OrderMetadata[]): Promise<MerkleTree> {
   if (!orders || orders.length === 0) {
@@ -227,27 +228,17 @@ export async function buildMerkleTree(orders: OrderMetadata[]): Promise<MerkleTr
 
   const levels: MerkleNode[][] = [leaves];
 
-  // 2. Build intermediate levels up to root
+  // 2. Build intermediate levels up to root using odd-node promotion
   let currentLevelNodes = leaves;
   let levelIdx = 1;
 
   while (currentLevelNodes.length > 1) {
     const nextLevelNodes: MerkleNode[] = [];
+    const pairsCount = Math.floor(currentLevelNodes.length / 2);
 
-    // Duplicate last node if odd number of nodes
-    const nodePairs: MerkleNode[] = [...currentLevelNodes];
-    if (nodePairs.length % 2 !== 0) {
-      const last = nodePairs[nodePairs.length - 1];
-      nodePairs.push({
-        ...last,
-        id: `${last.id}-dup`,
-        index: nodePairs.length,
-      });
-    }
-
-    for (let i = 0; i < nodePairs.length; i += 2) {
-      const leftNode = nodePairs[i];
-      const rightNode = nodePairs[i + 1];
+    for (let i = 0; i < pairsCount * 2; i += 2) {
+      const leftNode = currentLevelNodes[i];
+      const rightNode = currentLevelNodes[i + 1];
       const parentHash = await hashPair(leftNode.hash, rightNode.hash);
 
       const parentNode: MerkleNode = {
@@ -264,6 +255,22 @@ export async function buildMerkleTree(orders: OrderMetadata[]): Promise<MerkleTr
       leftNode.parent = parentNode;
       rightNode.parent = parentNode;
       nextLevelNodes.push(parentNode);
+    }
+
+    // Odd-node promotion: promote the last node without duplicating
+    if (currentLevelNodes.length % 2 !== 0) {
+      const oddNode = currentLevelNodes[currentLevelNodes.length - 1];
+      const promotedNode: MerkleNode = {
+        id: `L${levelIdx}-N${pairsCount}`,
+        hash: oddNode.hash, // Retain identical hash on promotion
+        level: levelIdx,
+        index: pairsCount,
+        isLeaf: false,
+        isRoot: false,
+        left: oddNode,
+      };
+      oddNode.parent = promotedNode;
+      nextLevelNodes.push(promotedNode);
     }
 
     levels.push(nextLevelNodes);
@@ -284,11 +291,12 @@ export async function buildMerkleTree(orders: OrderMetadata[]): Promise<MerkleTr
 }
 
 /**
- * Computes inclusion proof for a leaf by index.
+ * Computes inclusion proof for a leaf by index against a trusted root.
  */
 export async function generateMerkleProof(
   tree: MerkleTree,
   leafIndex: number,
+  expectedRootHash?: string,
 ): Promise<MerkleProof> {
   if (leafIndex < 0 || leafIndex >= tree.leaves.length) {
     throw new Error(`Leaf index ${leafIndex} out of bounds (0-${tree.leaves.length - 1})`);
@@ -302,41 +310,30 @@ export async function generateMerkleProof(
 
   for (let lvl = 0; lvl < tree.height; lvl++) {
     const levelNodes = tree.levels[lvl];
-    const isOddAtLevel = levelNodes.length % 2 !== 0;
+    const isOddPromoted = levelNodes.length % 2 !== 0 && currentIndex === levelNodes.length - 1;
 
-    // Sibling calculation
-    const isEven = currentIndex % 2 === 0;
-    const siblingIndex = isEven ? currentIndex + 1 : currentIndex - 1;
+    let siblingHash: string | null = null;
+    let siblingPosition: "left" | "right" | "none" = "none";
+    let computedHash = currentHash;
+    let formula = `Promote (L${lvl} ➔ L${lvl + 1})`;
 
-    let siblingHash: string;
-    let siblingPosition: "left" | "right";
-
-    if (isEven) {
-      siblingPosition = "right";
-      if (siblingIndex < levelNodes.length) {
-        siblingHash = levelNodes[siblingIndex].hash;
-      } else if (isOddAtLevel && currentIndex === levelNodes.length - 1) {
-        // Odd node paired with duplicate of itself
-        siblingHash = currentHash;
-      } else {
-        throw new Error(`Invalid tree sibling state at level ${lvl}`);
-      }
-    } else {
-      siblingPosition = "left";
+    if (!isOddPromoted) {
+      const isEven = currentIndex % 2 === 0;
+      const siblingIndex = isEven ? currentIndex + 1 : currentIndex - 1;
+      siblingPosition = isEven ? "right" : "left";
       siblingHash = levelNodes[siblingIndex].hash;
-    }
 
-    const left = siblingPosition === "left" ? siblingHash : currentHash;
-    const right = siblingPosition === "right" ? siblingHash : currentHash;
-    const computedHash = await hashPair(left, right);
+      const left = siblingPosition === "left" ? siblingHash : currentHash;
+      const right = siblingPosition === "right" ? siblingHash : currentHash;
+      computedHash = await hashPair(left, right);
+      formula =
+        siblingPosition === "left"
+          ? `H(sibling: ${siblingHash.slice(0, 8)}... || current: ${currentHash.slice(0, 8)}...)`
+          : `H(current: ${currentHash.slice(0, 8)}... || sibling: ${siblingHash.slice(0, 8)}...)`;
+    }
 
     const parentIndex = Math.floor(currentIndex / 2);
     const expectedHash = tree.levels[lvl + 1][parentIndex].hash;
-
-    const formula =
-      siblingPosition === "left"
-        ? `H(sibling: ${siblingHash.slice(0, 8)}... || current: ${currentHash.slice(0, 8)}...)`
-        : `H(current: ${currentHash.slice(0, 8)}... || sibling: ${siblingHash.slice(0, 8)}...)`;
 
     steps.push({
       level: lvl,
@@ -353,7 +350,8 @@ export async function generateMerkleProof(
     currentIndex = parentIndex;
   }
 
-  const isValid = currentHash === tree.root.hash && steps.every((s) => s.isVerified);
+  const trusted = expectedRootHash || tree.root.hash;
+  const isValid = currentHash === trusted && steps.every((s) => s.isVerified);
 
   return {
     leafIndex,
@@ -366,10 +364,11 @@ export async function generateMerkleProof(
 }
 
 /**
- * Validates a Merkle Proof step-by-step from scratch using SHA-256.
+ * Validates a Merkle Proof step-by-step from scratch using SHA-256 against an independent trusted root.
  */
 export async function verifyMerkleProofStepByStep(
   proof: MerkleProof,
+  trustedRootHash: string,
   customLeafHash?: string,
 ): Promise<{
   isValid: boolean;
@@ -377,15 +376,24 @@ export async function verifyMerkleProofStepByStep(
   expectedRoot: string;
   verifiedSteps: MerkleProofStep[];
 }> {
-  let runningHash = customLeafHash || proof.leafHash;
+  // Respect explicit empty string without falling back to proof.leafHash
+  const startingLeafHash = customLeafHash !== undefined ? customLeafHash : proof.leafHash;
+  let runningHash = startingLeafHash;
   const verifiedSteps: MerkleProofStep[] = [];
 
   for (let i = 0; i < proof.steps.length; i++) {
     const step = proof.steps[i];
-    const left = step.siblingPosition === "left" ? step.siblingHash : runningHash;
-    const right = step.siblingPosition === "right" ? step.siblingHash : runningHash;
+    let computed: string;
 
-    const computed = await hashPair(left, right);
+    if (step.siblingPosition === "none" || !step.siblingHash) {
+      // Promoted node directly moves up
+      computed = runningHash;
+    } else if (step.siblingPosition === "left") {
+      computed = await hashPair(step.siblingHash, runningHash);
+    } else {
+      computed = await hashPair(runningHash, step.siblingHash);
+    }
+
     const matchesExpected = computed === step.expectedHash;
 
     verifiedSteps.push({
@@ -399,9 +407,9 @@ export async function verifyMerkleProofStepByStep(
   }
 
   return {
-    isValid: runningHash === proof.rootHash,
+    isValid: runningHash === trustedRootHash,
     computedRoot: runningHash,
-    expectedRoot: proof.rootHash,
+    expectedRoot: trustedRootHash,
     verifiedSteps,
   };
 }
@@ -429,21 +437,42 @@ export function findLeafByTxHash(
 }
 
 /**
- * Sample realistic settlement batches with cryptographic authenticity.
+ * Valid RFC 4648 Base32 56-character Ed25519 Stellar public keys (G...) and Soroban contract IDs (C...).
+ */
+const STELLAR_FIXTURE_KEYS = {
+  contracts: {
+    techGadgets: "CDMJ3U7QHS3A4LYJVWHDJ5S4EN4VWAWSVEF2PG3SFOK4P6UJEGTOGZGT",
+    web3Masterclass: "CDRIFAFTLH3TYPJJLSIIVPWQQ5ZEAZ2NQMVZJKEQUKDAFDJVIJMBYQKV",
+    summerSale: "CA6AZRFHR3DP7H3K7RCVPANTXT3ZNAMODQE26YAB45P4JNC4TLE4PJSL",
+  },
+  affiliates: [
+    "GB3TUBZ57Q457XWRH3C4VRBTQSDVH2ANRNKPTZS6HWMMH5WSRIFQCSA5",
+    "GDPJZN2LYFGETWYBSFAYW7S6IMNFK55YMNX7YK7DW35ZDGPOE4BRWLIA",
+    "GBYHPM7TF5B3DVY5S6NVZOCJHRKJMQGSLJBYSGPYZA5F4LMVCRIQZMC3",
+    "GBSQKZMF4FMDE5WUXQACQPEXOW2OCE4SNM6JDAJ5EM6FLES5NDNXHGE2",
+    "GBVBVUAOFT7GFIXRVRQDH7OJZLBPZD7BPXGT4D5KI4J2SCZIWEHMGN3H",
+    "GBTZV4UPL3HXEEUCZVIVO5GFYDG7WLF5WU3FQXWFRWD7YJ5QT3NPBYCP",
+    "GAN3GI3RAALUFSFBPHYDNWPCPOIJ3RCO3Z2ATCYOFEJEXGXQCA3Y2JWN",
+    "GDMGRLUP4CAPRY67HOBNXGZRNXIRKFNGJ46Z42U4DTVGJC6UHU4WO6BC",
+  ],
+};
+
+/**
+ * Sample realistic settlement batches with authentic precomputed Soroban contract roots.
  */
 export const SAMPLE_SETTLEMENT_BATCHES: SettlementBatch[] = [
   {
     batchId: "BATCH-2026-05-16-01",
     campaignName: "Tech Gadgets Pro",
-    campaignAddress: "CA7QW5KXGPTR4N2K9J2L77XLMESCROW9999STORMTESTNET1",
+    campaignAddress: STELLAR_FIXTURE_KEYS.contracts.techGadgets,
     ledgerSequence: 48291042,
     settledAt: "2026-05-16 08:30 UTC",
-    contractRootHash: "", // Will be assigned from tree root
+    contractRootHash: "31aeaa6932814326f5131289a10ba98acf26c8bdd8fb8f3ee9c8d9ed6c0e6f7f",
     orders: [
       {
         orderId: "ORD-9401",
         txHash: "0x8f2a1b4c7d9e0f3a6b5c8d1e4f7a0b3c6d9e2f5a8b1c4d7e0f3a6b9c2d5e8f1a",
-        affiliateAddress: "GB12...34CD",
+        affiliateAddress: STELLAR_FIXTURE_KEYS.affiliates[0],
         campaignId: "CAMP-1042",
         campaignName: "Tech Gadgets Pro",
         amountXlm: 450.0,
@@ -454,7 +483,7 @@ export const SAMPLE_SETTLEMENT_BATCHES: SettlementBatch[] = [
       {
         orderId: "ORD-9402",
         txHash: "0x3c7e9a1b5d8f0a2c4e6b8d0f2a4c6e8a0b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a",
-        affiliateAddress: "GC78...90GH",
+        affiliateAddress: STELLAR_FIXTURE_KEYS.affiliates[1],
         campaignId: "CAMP-1042",
         campaignName: "Tech Gadgets Pro",
         amountXlm: 820.0,
@@ -465,7 +494,7 @@ export const SAMPLE_SETTLEMENT_BATCHES: SettlementBatch[] = [
       {
         orderId: "ORD-9403",
         txHash: "0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b",
-        affiliateAddress: "GD34...56IJ",
+        affiliateAddress: STELLAR_FIXTURE_KEYS.affiliates[2],
         campaignId: "CAMP-1042",
         campaignName: "Tech Gadgets Pro",
         amountXlm: 310.0,
@@ -476,7 +505,7 @@ export const SAMPLE_SETTLEMENT_BATCHES: SettlementBatch[] = [
       {
         orderId: "ORD-9404",
         txHash: "0x9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8e",
-        affiliateAddress: "GE56...78KL",
+        affiliateAddress: STELLAR_FIXTURE_KEYS.affiliates[3],
         campaignId: "CAMP-1042",
         campaignName: "Tech Gadgets Pro",
         amountXlm: 1250.0,
@@ -487,7 +516,7 @@ export const SAMPLE_SETTLEMENT_BATCHES: SettlementBatch[] = [
       {
         orderId: "ORD-9405",
         txHash: "0x4b6d8f0a2c4e6a8b0d2f4a6c8e0b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6a",
-        affiliateAddress: "GF78...90MN",
+        affiliateAddress: STELLAR_FIXTURE_KEYS.affiliates[4],
         campaignId: "CAMP-1042",
         campaignName: "Tech Gadgets Pro",
         amountXlm: 540.0,
@@ -498,7 +527,7 @@ export const SAMPLE_SETTLEMENT_BATCHES: SettlementBatch[] = [
       {
         orderId: "ORD-9406",
         txHash: "0x6e8a0b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6a8b0d2f4a6c8e0b2d4f6a8c",
-        affiliateAddress: "GG90...12OP",
+        affiliateAddress: STELLAR_FIXTURE_KEYS.affiliates[5],
         campaignId: "CAMP-1042",
         campaignName: "Tech Gadgets Pro",
         amountXlm: 670.0,
@@ -509,7 +538,7 @@ export const SAMPLE_SETTLEMENT_BATCHES: SettlementBatch[] = [
       {
         orderId: "ORD-9407",
         txHash: "0x2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6a8b0d2f4a6c8e0b2d4f6a8c0e2b4d",
-        affiliateAddress: "GH12...34QR",
+        affiliateAddress: STELLAR_FIXTURE_KEYS.affiliates[6],
         campaignId: "CAMP-1042",
         campaignName: "Tech Gadgets Pro",
         amountXlm: 390.0,
@@ -520,7 +549,7 @@ export const SAMPLE_SETTLEMENT_BATCHES: SettlementBatch[] = [
       {
         orderId: "ORD-9408",
         txHash: "0x0c2e4b6d8f0a2c4e6a8b0d2f4a6c8e0b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c",
-        affiliateAddress: "GJ34...56ST",
+        affiliateAddress: STELLAR_FIXTURE_KEYS.affiliates[7],
         campaignId: "CAMP-1042",
         campaignName: "Tech Gadgets Pro",
         amountXlm: 390.0,
@@ -533,15 +562,15 @@ export const SAMPLE_SETTLEMENT_BATCHES: SettlementBatch[] = [
   {
     batchId: "BATCH-2026-05-15-02",
     campaignName: "Web3 Masterclass",
-    campaignAddress: "CB9E88LMNPQR5TUV2WXY4444ESCROW8888STORMTESTNET2",
+    campaignAddress: STELLAR_FIXTURE_KEYS.contracts.web3Masterclass,
     ledgerSequence: 48150918,
     settledAt: "2026-05-15 14:45 UTC",
-    contractRootHash: "",
+    contractRootHash: "ae3ef4a91c10957800a78397c7288bd5e0d6aa3ba7a0ac823549ad420aa03755",
     orders: [
       {
         orderId: "ORD-8810",
         txHash: "0xaa11bb22cc33dd44ee55ff6677889900aabbccddeeff00112233445566778899",
-        affiliateAddress: "GA11...22AA",
+        affiliateAddress: STELLAR_FIXTURE_KEYS.affiliates[0],
         campaignId: "CAMP-988",
         campaignName: "Web3 Masterclass",
         amountXlm: 750.0,
@@ -552,7 +581,7 @@ export const SAMPLE_SETTLEMENT_BATCHES: SettlementBatch[] = [
       {
         orderId: "ORD-8811",
         txHash: "0xbb22cc33dd44ee55ff6677889900aabbccddeeff00112233445566778899aa11",
-        affiliateAddress: "GB22...33BB",
+        affiliateAddress: STELLAR_FIXTURE_KEYS.affiliates[1],
         campaignId: "CAMP-988",
         campaignName: "Web3 Masterclass",
         amountXlm: 1200.0,
@@ -563,7 +592,7 @@ export const SAMPLE_SETTLEMENT_BATCHES: SettlementBatch[] = [
       {
         orderId: "ORD-8812",
         txHash: "0xcc33dd44ee55ff6677889900aabbccddeeff00112233445566778899aa11bb22",
-        affiliateAddress: "GC33...44CC",
+        affiliateAddress: STELLAR_FIXTURE_KEYS.affiliates[2],
         campaignId: "CAMP-988",
         campaignName: "Web3 Masterclass",
         amountXlm: 980.0,
@@ -574,7 +603,7 @@ export const SAMPLE_SETTLEMENT_BATCHES: SettlementBatch[] = [
       {
         orderId: "ORD-8813",
         txHash: "0xdd44ee55ff6677889900aabbccddeeff00112233445566778899aa11bb22cc33",
-        affiliateAddress: "GD44...55DD",
+        affiliateAddress: STELLAR_FIXTURE_KEYS.affiliates[3],
         campaignId: "CAMP-988",
         campaignName: "Web3 Masterclass",
         amountXlm: 620.0,
@@ -587,15 +616,15 @@ export const SAMPLE_SETTLEMENT_BATCHES: SettlementBatch[] = [
   {
     batchId: "BATCH-2026-05-14-03",
     campaignName: "Summer Sale 2026",
-    campaignAddress: "CD4M11STORM22ESCROW33SOROBAN44AFFILIATE55XLM6",
+    campaignAddress: STELLAR_FIXTURE_KEYS.contracts.summerSale,
     ledgerSequence: 47992301,
     settledAt: "2026-05-14 18:00 UTC",
-    contractRootHash: "",
+    contractRootHash: "1bd150847d89668fb925cef12cb431dbf0aa28637fac83a136f7856cfea43469",
     orders: [
       {
         orderId: "ORD-7101",
         txHash: "0xee55ff6677889900aabbccddeeff00112233445566778899aa11bb22cc33dd44",
-        affiliateAddress: "GE55...66EE",
+        affiliateAddress: STELLAR_FIXTURE_KEYS.affiliates[4],
         campaignId: "CAMP-1100",
         campaignName: "Summer Sale 2026",
         amountXlm: 500.0,
@@ -606,7 +635,7 @@ export const SAMPLE_SETTLEMENT_BATCHES: SettlementBatch[] = [
       {
         orderId: "ORD-7102",
         txHash: "0xff6677889900aabbccddeeff00112233445566778899aa11bb22cc33dd44ee55",
-        affiliateAddress: "GF66...77FF",
+        affiliateAddress: STELLAR_FIXTURE_KEYS.affiliates[5],
         campaignId: "CAMP-1100",
         campaignName: "Summer Sale 2026",
         amountXlm: 1450.0,

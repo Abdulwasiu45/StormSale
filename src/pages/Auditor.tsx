@@ -15,6 +15,7 @@ interface AuditorProps {
 
 const AuditorContent: React.FC<AuditorProps> = ({ onBack }) => {
   const [activeTab, setActiveTab] = useState("overview");
+  const [merkleTargetSaleId, setMerkleTargetSaleId] = useState<string | undefined>(undefined);
 
   const tabs = [
     { id: "overview", label: "Dashboard Overview", icon: BarChart3 },
@@ -24,14 +25,21 @@ const AuditorContent: React.FC<AuditorProps> = ({ onBack }) => {
     { id: "compliance", label: "Compliance Report", icon: FileCheck },
   ];
 
+  const handleViewMerkleProof = (saleId: string) => {
+    setMerkleTargetSaleId(saleId);
+    setActiveTab("merkle");
+  };
+
   const renderContent = () => {
     switch (activeTab) {
       case "merkle":
-        return <MerkleTreeVisualizer />;
+        return <MerkleTreeVisualizer initialSaleId={merkleTargetSaleId} />;
       case "verify":
         return <VerifyAccess />;
       case "history":
-        return <AuditHistory onTabChange={setActiveTab} />;
+        return (
+          <AuditHistory onTabChange={setActiveTab} onViewMerkleProof={handleViewMerkleProof} />
+        );
       case "compliance":
         return <ComplianceReport />;
       default:

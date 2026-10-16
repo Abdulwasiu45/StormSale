@@ -8,14 +8,17 @@ import {
 } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
+import { useNotification } from "../../context/NotificationContext";
 import {
   buildMerkleTree,
   generateMerkleProof,
+  verifyMerkleProofStepByStep,
   findLeafByTxHash,
   SAMPLE_SETTLEMENT_BATCHES,
   type MerkleTree,
   type MerkleNode,
   type MerkleProof,
+  type MerkleProofStep,
 } from "../../utils/merkle";
 import {
   GitFork,
@@ -46,9 +49,56 @@ interface NodePosition {
   y: number;
 }
 
-export const MerkleTreeVisualizer: React.FC = () => {
+export interface MerkleTreeVisualizerProps {
+  initialSaleId?: string;
+  initialTxHash?: string;
+  initialBatchIndex?: number;
+}
+
+export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
+  initialSaleId,
+  initialTxHash,
+  initialBatchIndex,
+}) => {
+  const { showNotification } = useNotification();
+
+  // Determine initial batch from initialSaleId / initialTxHash / initialBatchIndex
+  const resolvedInitialBatchIndex = useMemo(() => {
+    if (
+      typeof initialBatchIndex === "number" &&
+      initialBatchIndex >= 0 &&
+      initialBatchIndex < SAMPLE_SETTLEMENT_BATCHES.length
+    ) {
+      return initialBatchIndex;
+    }
+    if (initialSaleId) {
+      const cleanSaleId = initialSaleId.trim().toLowerCase();
+      for (let bIdx = 0; bIdx < SAMPLE_SETTLEMENT_BATCHES.length; bIdx++) {
+        const batch = SAMPLE_SETTLEMENT_BATCHES[bIdx];
+        const match = batch.orders.some(
+          (o) =>
+            o.orderId.toLowerCase().includes(cleanSaleId) ||
+            o.campaignId.toLowerCase().includes(cleanSaleId) ||
+            cleanSaleId.includes(o.orderId.toLowerCase().replace("ord-", "")),
+        );
+        if (match) return bIdx;
+      }
+    }
+    if (initialTxHash) {
+      const cleanTx = initialTxHash.trim().toLowerCase().replace(/^0x/, "");
+      for (let bIdx = 0; bIdx < SAMPLE_SETTLEMENT_BATCHES.length; bIdx++) {
+        const batch = SAMPLE_SETTLEMENT_BATCHES[bIdx];
+        const match = batch.orders.some(
+          (o) => o.txHash.toLowerCase().replace(/^0x/, "") === cleanTx,
+        );
+        if (match) return bIdx;
+      }
+    }
+    return 0;
+  }, [initialBatchIndex, initialSaleId, initialTxHash]);
+
   // Batch state
-  const [selectedBatchIndex, setSelectedBatchIndex] = useState(0);
+  const [selectedBatchIndex, setSelectedBatchIndex] = useState(resolvedInitialBatchIndex);
   const currentBatch = SAMPLE_SETTLEMENT_BATCHES[selectedBatchIndex];
 
   // Tree state
@@ -58,13 +108,20 @@ export const MerkleTreeVisualizer: React.FC = () => {
   // Selection & proof state
   const [selectedLeafIndex, setSelectedLeafIndex] = useState<number>(0);
   const [activeProof, setActiveProof] = useState<MerkleProof | null>(null);
-  const [activeStepIndex, setActiveStepIndex] = useState<number>(-1); // -1 = show full path
+  const [verificationResult, setVerificationResult] = useState<{
+    isValid: boolean;
+    computedRoot: string;
+    expectedRoot: string;
+    verifiedSteps: MerkleProofStep[];
+  } | null>(null);
+
+  const [activeStepIndex, setActiveStepIndex] = useState<number>(-1); // -1 = show all steps
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isTampered, setIsTampered] = useState<boolean>(false);
   const [tamperedHash, setTamperedHash] = useState<string>("");
 
   // Search & Upload state
-  const [searchTxHash, setSearchTxHash] = useState<string>("");
+  const [searchTxHash, setSearchTxHash] = useState<string>(initialTxHash || "");
   const [searchStatus, setSearchStatus] = useState<{
     type: "idle" | "success" | "error";
     message: string;
@@ -84,7 +141,7 @@ export const MerkleTreeVisualizer: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 1. Build Merkle tree when batch changes
+  // 1. Build Merkle tree when batch changes (Reads independent precomputed contractRootHash)
   useEffect(() => {
     let isMounted = true;
 
@@ -92,8 +149,23 @@ export const MerkleTreeVisualizer: React.FC = () => {
       .then((newTree) => {
         if (!isMounted) return;
         setTree(newTree);
-        currentBatch.contractRootHash = newTree.root.hash;
-        setSelectedLeafIndex(0);
+
+        // Find initial leaf if initialSaleId or initialTxHash was supplied
+        let initialLeaf = 0;
+        if (initialSaleId) {
+          const cleanSaleId = initialSaleId.trim().toLowerCase();
+          const matchIdx = currentBatch.orders.findIndex(
+            (o) =>
+              o.orderId.toLowerCase().includes(cleanSaleId) ||
+              cleanSaleId.includes(o.orderId.toLowerCase().replace("ord-", "")),
+          );
+          if (matchIdx >= 0) initialLeaf = matchIdx;
+        } else if (initialTxHash) {
+          const match = findLeafByTxHash(newTree, initialTxHash);
+          if (match) initialLeaf = match.index;
+        }
+
+        setSelectedLeafIndex(initialLeaf);
         setIsTampered(false);
         setTamperedHash("");
         setActiveStepIndex(-1);
@@ -108,16 +180,16 @@ export const MerkleTreeVisualizer: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [selectedBatchIndex]);
+  }, [selectedBatchIndex, currentBatch.orders, initialSaleId, initialTxHash]);
 
-  // 2. Generate proof when selected leaf changes
+  // 2. Generate proof when selected leaf changes against trusted on-chain root
   useEffect(() => {
     let isMounted = true;
     if (!tree || selectedLeafIndex < 0 || selectedLeafIndex >= tree.leaves.length) {
       return;
     }
 
-    generateMerkleProof(tree, selectedLeafIndex)
+    generateMerkleProof(tree, selectedLeafIndex, currentBatch.contractRootHash)
       .then((proof) => {
         if (isMounted) setActiveProof(proof);
       })
@@ -126,9 +198,33 @@ export const MerkleTreeVisualizer: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [tree, selectedLeafIndex]);
+  }, [tree, selectedLeafIndex, currentBatch.contractRootHash]);
 
-  // 3. Step-by-step autoplay timer
+  // 3. Dynamic cryptographic verification computation for console
+  useEffect(() => {
+    let isMounted = true;
+    if (!activeProof) {
+      return;
+    }
+
+    verifyMerkleProofStepByStep(
+      activeProof,
+      currentBatch.contractRootHash,
+      isTampered ? tamperedHash : undefined,
+    )
+      .then((result) => {
+        if (isMounted) setVerificationResult(result);
+      })
+      .catch((err) => {
+        console.error("Verification execution error:", err);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activeProof, isTampered, tamperedHash, currentBatch.contractRootHash]);
+
+  // 4. Step-by-step autoplay timer
   useEffect(() => {
     if (!isPlaying || !activeProof) return;
 
@@ -145,11 +241,36 @@ export const MerkleTreeVisualizer: React.FC = () => {
     return () => clearInterval(interval);
   }, [isPlaying, activeProof]);
 
-  // Copy helper
-  const handleCopy = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedHash(text);
-    setTimeout(() => setCopiedHash(null), 2000);
+  // Copy helper with robust error handling and user toast feedback
+  const handleCopy = async (text: string, label = "Item") => {
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.style.position = "fixed";
+        textArea.style.opacity = "0";
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textArea);
+      }
+      setCopiedHash(text);
+      showNotification({
+        type: "success",
+        title: "Copied to Clipboard",
+        message: `${label} copied successfully.`,
+      });
+      setTimeout(() => setCopiedHash(null), 2000);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : "Clipboard access denied";
+      showNotification({
+        type: "error",
+        title: "Copy Failed",
+        message: errMsg,
+      });
+    }
   };
 
   // Search transaction hash
@@ -198,12 +319,10 @@ export const MerkleTreeVisualizer: React.FC = () => {
             (Array.isArray(parsed) && parsed[0]?.txHash) ||
             "";
         } else {
-          // Look for 0x[a-f0-9]{64} in plaintext or csv
           const match = text.match(/0x[a-fA-F0-9]{64}/);
           if (match) {
             candidateTx = match[0];
           } else {
-            // Check raw 64 hex characters
             const rawMatch = text.match(/[a-fA-F0-9]{64}/);
             if (rawMatch) candidateTx = `0x${rawMatch[0]}`;
           }
@@ -236,7 +355,6 @@ export const MerkleTreeVisualizer: React.FC = () => {
       setTamperedHash("");
     } else {
       setIsTampered(true);
-      // Flip first byte from '0' to 'f' or vice versa
       const original = activeProof.leafHash;
       const flipped = original[0] === "a" ? `b${original.slice(1)}` : `a${original.slice(1)}`;
       setTamperedHash(flipped);
@@ -255,24 +373,22 @@ export const MerkleTreeVisualizer: React.FC = () => {
     // Trace path and siblings
     let curIdx = selectedLeafIndex;
     for (let lvl = 0; lvl < tree.height; lvl++) {
-      const isEven = curIdx % 2 === 0;
-      const sibIdx = isEven ? curIdx + 1 : curIdx - 1;
-      const levelNodes = tree.levels[lvl];
+      const isOddPromoted =
+        tree.levels[lvl].length % 2 !== 0 && curIdx === tree.levels[lvl].length - 1;
 
-      // Mark sibling in GREEN
-      if (sibIdx < levelNodes.length) {
-        roles[levelNodes[sibIdx].id] = "sibling";
+      if (!isOddPromoted) {
+        const isEven = curIdx % 2 === 0;
+        const sibIdx = isEven ? curIdx + 1 : curIdx - 1;
+        const levelNodes = tree.levels[lvl];
+
+        if (sibIdx < levelNodes.length) {
+          roles[levelNodes[sibIdx].id] = "sibling";
+        }
       }
 
-      // Mark parent as ancestor
       const parentIdx = Math.floor(curIdx / 2);
       if (tree.levels[lvl + 1] && tree.levels[lvl + 1][parentIdx]) {
-        const parentNode = tree.levels[lvl + 1][parentIdx];
-        if (parentNode.isRoot) {
-          roles[parentNode.id] = "ancestor";
-        } else {
-          roles[parentNode.id] = "ancestor";
-        }
+        roles[tree.levels[lvl + 1][parentIdx].id] = "ancestor";
       }
 
       curIdx = parentIdx;
@@ -287,7 +403,7 @@ export const MerkleTreeVisualizer: React.FC = () => {
       return { nodePositions: new Map<string, NodePosition>(), svgWidth: 900, svgHeight: 500 };
 
     const positions = new Map<string, NodePosition>();
-    const totalLevels = tree.levels.length; // e.g. 4 for 8 leaves
+    const totalLevels = tree.levels.length;
     const leafCount = tree.leaves.length;
 
     const horizontalSpacing = Math.max(140, Math.min(180, 850 / leafCount));
@@ -295,18 +411,16 @@ export const MerkleTreeVisualizer: React.FC = () => {
     const verticalSpacing = 130;
     const calculatedHeight = totalLevels * verticalSpacing + 80;
 
-    // Layout each level
     tree.levels.forEach((nodes, levelIdx) => {
       const y =
         treeOrientation === "top-down"
-          ? (totalLevels - 1 - levelIdx) * verticalSpacing + 70 // Level 0 leaves at bottom, root at top
-          : levelIdx * verticalSpacing + 70; // Level 0 leaves at top, root at bottom
+          ? (totalLevels - 1 - levelIdx) * verticalSpacing + 70
+          : levelIdx * verticalSpacing + 70;
 
       const levelWidth = calculatedWidth - 160;
       const stepX = levelWidth / nodes.length;
 
       nodes.forEach((node, idx) => {
-        // If node has children, position in center of children for balanced tree aesthetic
         let x = 80 + stepX * (idx + 0.5);
         if (node.left && node.right) {
           const leftPos = positions.get(node.left.id);
@@ -322,33 +436,6 @@ export const MerkleTreeVisualizer: React.FC = () => {
 
     return { nodePositions: positions, svgWidth: calculatedWidth, svgHeight: calculatedHeight };
   }, [tree, treeOrientation]);
-
-  // Step verification info
-  const stepVerification = useMemo(() => {
-    if (!activeProof) return null;
-    let currentHash = isTampered ? tamperedHash : activeProof.leafHash;
-    const stepsData = [];
-
-    for (let i = 0; i < activeProof.steps.length; i++) {
-      const step = activeProof.steps[i];
-      const left = step.siblingPosition === "left" ? step.siblingHash : currentHash;
-      const right = step.siblingPosition === "right" ? step.siblingHash : currentHash;
-      stepsData.push({
-        stepNumber: i + 1,
-        level: step.level,
-        left,
-        right,
-        siblingHash: step.siblingHash,
-        siblingPosition: step.siblingPosition,
-        currentHash,
-        expectedHash: step.expectedHash,
-        formula: step.formula,
-      });
-      currentHash = step.expectedHash;
-    }
-
-    return stepsData;
-  }, [activeProof, isTampered, tamperedHash]);
 
   return (
     <div className="space-y-8 pb-12 font-sans">
@@ -384,6 +471,7 @@ export const MerkleTreeVisualizer: React.FC = () => {
                 Select Settlement Batch
               </label>
               <select
+                aria-label="Select Settlement Batch"
                 value={selectedBatchIndex}
                 onChange={(e) => setSelectedBatchIndex(Number(e.target.value))}
                 className="w-full bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white font-semibold text-sm rounded-xl px-3 py-2 border border-slate-200 dark:border-zinc-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-sm"
@@ -432,10 +520,10 @@ export const MerkleTreeVisualizer: React.FC = () => {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => handleCopy(tree?.root.hash || "")}
+                onClick={() => handleCopy(currentBatch.contractRootHash, "On-Chain Merkle Root")}
                 className="h-6 px-2 text-xs text-zinc-500 hover:text-indigo-600 dark:hover:text-indigo-400"
               >
-                {copiedHash === tree?.root.hash ? (
+                {copiedHash === currentBatch.contractRootHash ? (
                   <Check className="w-3 h-3 text-emerald-500 mr-1" />
                 ) : (
                   <Copy className="w-3 h-3 mr-1" />
@@ -445,7 +533,7 @@ export const MerkleTreeVisualizer: React.FC = () => {
             </div>
             <div className="flex items-center gap-2 mt-1">
               <span className="font-mono text-xs font-bold text-indigo-700 dark:text-indigo-300 truncate bg-indigo-50/80 dark:bg-indigo-950/50 px-2 py-1 rounded-lg border border-indigo-200/60 dark:border-indigo-800/50">
-                {tree ? `0x${tree.root.hash}` : "Calculating root..."}
+                0x{currentBatch.contractRootHash}
               </span>
             </div>
           </div>
@@ -490,6 +578,7 @@ export const MerkleTreeVisualizer: React.FC = () => {
                   if (e.target.files && e.target.files[0]) {
                     handleFileUpload(e.target.files[0]);
                   }
+                  e.target.value = ""; // Reset value so re-selecting same file triggers change
                 }}
               />
               <Button
@@ -683,7 +772,6 @@ export const MerkleTreeVisualizer: React.FC = () => {
             >
               <svg width={svgWidth} height={svgHeight} className="overflow-visible">
                 <defs>
-                  {/* Glowing line filters */}
                   <filter id="glow-green" x="-20%" y="-20%" width="140%" height="140%">
                     <feDropShadow
                       dx="0"
@@ -706,7 +794,7 @@ export const MerkleTreeVisualizer: React.FC = () => {
 
                 {/* Draw Connecting Branches (Curved Bezier Paths) */}
                 {tree?.levels.map((levelNodes, lvl) => {
-                  if (lvl === 0) return null; // Leaves have no children below them
+                  if (lvl === 0) return null;
 
                   return levelNodes.map((parent) => {
                     const parentPos = nodePositions.get(parent.id);
@@ -718,33 +806,29 @@ export const MerkleTreeVisualizer: React.FC = () => {
                       const childPos = nodePositions.get(child.id);
                       if (!childPos) return null;
 
-                      // Check path highlighting
                       const childRole = nodeRoles[child.id];
                       const parentRole = nodeRoles[parent.id];
 
-                      // Is this branch part of the verification path?
-                      // Sibling connector lights up in GREEN
                       const isSiblingBranch = childRole === "sibling";
                       const isAncestorBranch =
                         (childRole === "selected" || childRole === "ancestor") &&
                         (parentRole === "ancestor" || parentRole === "selected");
 
-                      let strokeColor = "#94a3b8"; // Slate-400 default
+                      let strokeColor = "#94a3b8";
                       let strokeWidth = 1.75;
                       const strokeDasharray = "none";
                       let filter = "none";
 
                       if (isSiblingBranch) {
-                        strokeColor = "#10b981"; // Vibrant Emerald Green
+                        strokeColor = "#10b981";
                         strokeWidth = 3;
                         filter = "url(#glow-green)";
                       } else if (isAncestorBranch) {
-                        strokeColor = "#6366f1"; // Vibrant Indigo
+                        strokeColor = "#6366f1";
                         strokeWidth = 3;
                         filter = "url(#glow-indigo)";
                       }
 
-                      // Bezier curve connector
                       const midY = (parentPos.y + childPos.y) / 2;
                       const pathData = `M ${parentPos.x} ${parentPos.y} C ${parentPos.x} ${midY}, ${childPos.x} ${midY}, ${childPos.x} ${childPos.y}`;
 
@@ -772,7 +856,6 @@ export const MerkleTreeVisualizer: React.FC = () => {
                   const isSibling = role === "sibling";
                   const isAncestor = role === "ancestor";
 
-                  // Sizing
                   const nodeWidth = node.isLeaf ? 130 : node.isRoot ? 170 : 120;
                   const nodeHeight = node.isLeaf ? 54 : node.isRoot ? 50 : 44;
 
@@ -799,7 +882,6 @@ export const MerkleTreeVisualizer: React.FC = () => {
                       }}
                       onMouseLeave={() => setHoveredNode(null)}
                     >
-                      {/* Node Box Background & Border */}
                       <rect
                         width={nodeWidth}
                         height={nodeHeight}
@@ -836,7 +918,6 @@ export const MerkleTreeVisualizer: React.FC = () => {
                       {/* Node Text Content */}
                       {node.isLeaf ? (
                         <>
-                          {/* Order ID & Tag */}
                           <text
                             x={nodeWidth / 2}
                             y={20}
@@ -853,7 +934,6 @@ export const MerkleTreeVisualizer: React.FC = () => {
                             {node.order?.orderId}
                           </text>
 
-                          {/* Truncated Hash */}
                           <text
                             x={nodeWidth / 2}
                             y={38}
@@ -965,7 +1045,7 @@ export const MerkleTreeVisualizer: React.FC = () => {
                   )}
                 </div>
                 <button
-                  onClick={() => handleCopy(hoveredNode.node.hash)}
+                  onClick={() => handleCopy(hoveredNode.node.hash, "Node Hash")}
                   className="text-[11px] font-semibold text-zinc-400 hover:text-white flex items-center gap-1 bg-zinc-800 px-2 py-0.5 rounded-md"
                 >
                   {copiedHash === hoveredNode.node.hash ? (
@@ -1000,7 +1080,8 @@ export const MerkleTreeVisualizer: React.FC = () => {
                   <div className="flex justify-between">
                     <span className="text-zinc-400">Affiliate:</span>
                     <span className="font-mono text-indigo-300">
-                      {hoveredNode.node.order.affiliateAddress}
+                      {hoveredNode.node.order.affiliateAddress.slice(0, 6)}...
+                      {hoveredNode.node.order.affiliateAddress.slice(-4)}
                     </span>
                   </div>
                   <div className="flex justify-between">
@@ -1012,7 +1093,15 @@ export const MerkleTreeVisualizer: React.FC = () => {
                   <div className="flex justify-between">
                     <span className="text-zinc-400">Commission:</span>
                     <span className="font-bold text-emerald-400">
-                      {hoveredNode.node.order.commissionXlm} XLM (10%)
+                      {hoveredNode.node.order.commissionXlm} XLM (
+                      {hoveredNode.node.order.amountXlm > 0
+                        ? (
+                            (hoveredNode.node.order.commissionXlm /
+                              hoveredNode.node.order.amountXlm) *
+                            100
+                          ).toFixed(0)
+                        : 0}
+                      %)
                     </span>
                   </div>
                   <div className="flex justify-between">
@@ -1041,13 +1130,17 @@ export const MerkleTreeVisualizer: React.FC = () => {
                 <ShieldCheck className="w-5 h-5 text-emerald-500" />
                 Step-by-Step SHA-256 Inclusion Proof Validation
               </CardTitle>
-              {isTampered ? (
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400 border border-red-300 dark:border-red-500/30">
-                  Tamper Detected ❌
+              {verificationResult === null ? (
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400 border border-slate-200 dark:border-zinc-700">
+                  Select a Leaf
                 </span>
-              ) : (
+              ) : verificationResult.isValid ? (
                 <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-500/30">
                   Proof Verified ✅
+                </span>
+              ) : (
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400 border border-red-300 dark:border-red-500/30">
+                  Tamper / Mismatch Detected ❌
                 </span>
               )}
             </div>
@@ -1146,7 +1239,7 @@ export const MerkleTreeVisualizer: React.FC = () => {
                   Proof Depth:
                 </span>
                 <span className="ml-2 px-2.5 py-1 rounded-xl bg-white dark:bg-zinc-800 border border-indigo-200 dark:border-zinc-700 font-mono text-xs font-bold text-indigo-600 dark:text-indigo-400">
-                  {activeProof.steps.length} Sibling Hashes
+                  {activeProof.steps.length} Levels
                 </span>
               </div>
             </div>
@@ -1154,13 +1247,13 @@ export const MerkleTreeVisualizer: React.FC = () => {
 
           {/* Sequential Cryptographic Calculation Cards */}
           <div className="space-y-4">
-            {stepVerification?.map((step, idx) => {
+            {verificationResult?.verifiedSteps.map((step, idx) => {
               const isCurrentStep = activeStepIndex === idx;
               const isDimmed = activeStepIndex !== -1 && activeStepIndex !== idx;
 
               return (
                 <motion.div
-                  key={step.stepNumber}
+                  key={step.level}
                   animate={{
                     opacity: isDimmed ? 0.45 : 1,
                     scale: isCurrentStep ? 1.01 : 1,
@@ -1174,7 +1267,7 @@ export const MerkleTreeVisualizer: React.FC = () => {
                   <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-3">
                     <div className="flex items-center gap-2">
                       <span className="w-6 h-6 rounded-lg bg-indigo-600 text-white font-mono text-xs font-bold flex items-center justify-center">
-                        {step.stepNumber}
+                        {idx + 1}
                       </span>
                       <span className="font-bold text-sm text-zinc-900 dark:text-white">
                         Level {step.level} Hash Combination ➔ Level {step.level + 1} Parent
@@ -1182,61 +1275,98 @@ export const MerkleTreeVisualizer: React.FC = () => {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <span className="text-xs px-2.5 py-1 rounded-lg font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/30 flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                        Merkle Sibling: {step.siblingPosition === "left" ? "Left" : "Right"}
-                      </span>
+                      {step.siblingPosition === "none" ? (
+                        <span className="text-xs px-2.5 py-1 rounded-lg font-bold bg-sky-100 text-sky-800 dark:bg-sky-500/20 dark:text-sky-300 border border-sky-300 dark:border-sky-500/30">
+                          Promoted Odd Node
+                        </span>
+                      ) : (
+                        <span className="text-xs px-2.5 py-1 rounded-lg font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/30 flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                          Merkle Sibling: {step.siblingPosition === "left" ? "Left" : "Right"}
+                        </span>
+                      )}
                     </div>
                   </div>
 
                   {/* Cryptographic Pair Visualizer */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs font-mono">
-                    <div
-                      className={`p-3 rounded-xl border ${
-                        step.siblingPosition === "left"
-                          ? "bg-emerald-50/60 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-600/50 text-emerald-900 dark:text-emerald-200"
-                          : "bg-slate-50 dark:bg-zinc-800/50 border-slate-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300"
-                      }`}
-                    >
-                      <span className="text-[10px] uppercase font-bold block mb-1">
-                        Left Input{" "}
-                        {step.siblingPosition === "left"
-                          ? "(🌿 Merkle Sibling)"
-                          : "(Current Branch)"}
-                        :
-                      </span>
-                      <span className="break-all font-semibold">0x{step.left}</span>
-                    </div>
+                  {step.siblingPosition !== "none" && step.siblingHash && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs font-mono">
+                      <div
+                        className={`p-3 rounded-xl border ${
+                          step.siblingPosition === "left"
+                            ? "bg-emerald-50/60 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-600/50 text-emerald-900 dark:text-emerald-200"
+                            : "bg-slate-50 dark:bg-zinc-800/50 border-slate-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300"
+                        }`}
+                      >
+                        <span className="text-[10px] uppercase font-bold block mb-1">
+                          Left Input{" "}
+                          {step.siblingPosition === "left"
+                            ? "(🌿 Merkle Sibling)"
+                            : "(Current Branch)"}
+                          :
+                        </span>
+                        <span className="break-all font-semibold">
+                          0x{step.siblingPosition === "left" ? step.siblingHash : step.currentHash}
+                        </span>
+                      </div>
 
-                    <div
-                      className={`p-3 rounded-xl border ${
-                        step.siblingPosition === "right"
-                          ? "bg-emerald-50/60 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-600/50 text-emerald-900 dark:text-emerald-200"
-                          : "bg-slate-50 dark:bg-zinc-800/50 border-slate-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300"
-                      }`}
-                    >
-                      <span className="text-[10px] uppercase font-bold block mb-1">
-                        Right Input{" "}
-                        {step.siblingPosition === "right"
-                          ? "(🌿 Merkle Sibling)"
-                          : "(Current Branch)"}
-                        :
-                      </span>
-                      <span className="break-all font-semibold">0x{step.right}</span>
+                      <div
+                        className={`p-3 rounded-xl border ${
+                          step.siblingPosition === "right"
+                            ? "bg-emerald-50/60 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-600/50 text-emerald-900 dark:text-emerald-200"
+                            : "bg-slate-50 dark:bg-zinc-800/50 border-slate-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300"
+                        }`}
+                      >
+                        <span className="text-[10px] uppercase font-bold block mb-1">
+                          Right Input{" "}
+                          {step.siblingPosition === "right"
+                            ? "(🌿 Merkle Sibling)"
+                            : "(Current Branch)"}
+                          :
+                        </span>
+                        <span className="break-all font-semibold">
+                          0x{step.siblingPosition === "right" ? step.siblingHash : step.currentHash}
+                        </span>
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* SHA-256 Output Result */}
                   <div className="mt-3 p-3 rounded-xl bg-slate-100/70 dark:bg-zinc-950/60 border border-slate-200 dark:border-zinc-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                     <div className="font-mono text-xs">
-                      <span className="text-zinc-500 font-bold mr-2">SHA-256(Left || Right) =</span>
-                      <span className="text-indigo-700 dark:text-indigo-300 font-bold break-all">
-                        0x{step.expectedHash}
+                      <span className="text-zinc-500 font-bold mr-2">
+                        {step.siblingPosition === "none"
+                          ? "Promoted Hash ="
+                          : "SHA-256(Left || Right) ="}
+                      </span>
+                      <span
+                        className={`font-bold break-all ${
+                          step.isVerified
+                            ? "text-indigo-700 dark:text-indigo-300"
+                            : "text-red-600 dark:text-red-400"
+                        }`}
+                      >
+                        0x{step.computedHash}
                       </span>
                     </div>
-                    <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1 shrink-0">
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      Step Verified
+                    <span
+                      className={`text-xs font-bold flex items-center gap-1 shrink-0 ${
+                        step.isVerified
+                          ? "text-emerald-600 dark:text-emerald-400"
+                          : "text-red-600 dark:text-red-400"
+                      }`}
+                    >
+                      {step.isVerified ? (
+                        <>
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          Step Verified
+                        </>
+                      ) : (
+                        <>
+                          <XCircle className="w-3.5 h-3.5" />
+                          Hash Mismatch
+                        </>
+                      )}
                     </span>
                   </div>
                 </motion.div>
@@ -1247,26 +1377,26 @@ export const MerkleTreeVisualizer: React.FC = () => {
           {/* Root Match Comparison Footer */}
           <div
             className={`mt-6 p-5 rounded-2xl border flex flex-col md:flex-row justify-between items-start md:items-center gap-4 ${
-              isTampered
+              verificationResult && !verificationResult.isValid
                 ? "bg-red-50 dark:bg-red-950/30 border-red-300 dark:border-red-800 text-red-900 dark:text-red-200"
                 : "bg-emerald-50/80 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700 text-emerald-950 dark:text-emerald-100"
             }`}
           >
             <div>
               <div className="flex items-center gap-2">
-                {isTampered ? (
+                {verificationResult && !verificationResult.isValid ? (
                   <XCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
                 ) : (
                   <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
                 )}
                 <span className="font-extrabold text-base">
-                  {isTampered
+                  {verificationResult && !verificationResult.isValid
                     ? "Inclusion Proof Fails: Computed Root Mismatches On-Chain State"
                     : "Cryptographic Inclusion Proof Confirmed Against Soroban Root"}
                 </span>
               </div>
               <p className="text-xs opacity-90 mt-1">
-                {isTampered
+                {verificationResult && !verificationResult.isValid
                   ? "Audit Alert: Transaction data tampering detected! The reconstructed Merkle root differs from the immutable on-chain root published in ledger sequence #" +
                     currentBatch.ledgerSequence
                   : "All intermediary SHA-256 hashes resolve deterministically to the Soroban contract Merkle root. Conversion leaf is authentic and untampered."}
@@ -1279,10 +1409,12 @@ export const MerkleTreeVisualizer: React.FC = () => {
                 const proofPayload = {
                   batchId: currentBatch.batchId,
                   ledgerSequence: currentBatch.ledgerSequence,
+                  contractRootHash: currentBatch.contractRootHash,
                   leafIndex: activeProof?.leafIndex,
-                  leafHash: activeProof?.leafHash,
+                  leafHash: isTampered ? tamperedHash : activeProof?.leafHash,
                   orderMetadata: activeProof?.leafOrder,
-                  rootHash: activeProof?.rootHash,
+                  computedRoot: verificationResult?.computedRoot,
+                  isValid: verificationResult?.isValid,
                   siblings: activeProof?.steps.map((s) => ({
                     level: s.level,
                     position: s.siblingPosition,
@@ -1290,7 +1422,7 @@ export const MerkleTreeVisualizer: React.FC = () => {
                   })),
                   verifiedAt: new Date().toISOString(),
                 };
-                handleCopy(JSON.stringify(proofPayload, null, 2));
+                handleCopy(JSON.stringify(proofPayload, null, 2), "Audit Proof JSON");
               }}
               className="rounded-xl border-emerald-300 dark:border-emerald-600 text-xs font-bold h-10 px-4 shrink-0 bg-white/60 dark:bg-zinc-900/60"
             >

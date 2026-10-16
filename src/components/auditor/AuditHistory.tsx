@@ -21,6 +21,7 @@ type AuditStatus = "Verified" | "Denied" | "Pending";
 
 interface AuditHistoryProps {
   onTabChange?: (tab: string) => void;
+  onViewMerkleProof?: (saleId: string, campaign: string) => void;
 }
 
 interface AuditRecord {
@@ -104,7 +105,10 @@ const statusConfig: Record<
   },
 };
 
-export const AuditHistory: React.FC<AuditHistoryProps> = ({ onTabChange }) => {
+export const AuditHistory: React.FC<AuditHistoryProps> = ({
+  onTabChange,
+  onViewMerkleProof,
+}) => {
   const verified = auditRecords.filter((r) => r.status === "Verified").length;
   const denied = auditRecords.filter((r) => r.status === "Denied").length;
   const pending = auditRecords.filter((r) => r.status === "Pending").length;
@@ -217,11 +221,17 @@ export const AuditHistory: React.FC<AuditHistoryProps> = ({ onTabChange }) => {
                     <div className="text-xs font-medium text-zinc-400 dark:text-zinc-500">
                       {record.timestamp}
                     </div>
-                    {record.status === "Verified" && onTabChange && (
+                    {record.status === "Verified" && (onViewMerkleProof || onTabChange) && (
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() => onTabChange("merkle")}
+                        onClick={() => {
+                          if (onViewMerkleProof) {
+                            onViewMerkleProof(record.saleId, record.campaign);
+                          } else if (onTabChange) {
+                            onTabChange("merkle");
+                          }
+                        }}
                         className="h-6 px-2 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 flex items-center gap-1"
                       >
                         <GitFork className="w-3 h-3" />
