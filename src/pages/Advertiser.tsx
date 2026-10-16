@@ -10,6 +10,8 @@ import { WebhookManager } from "../components/advertiser/WebhookManager";
 import { BrandCustomizer } from "../components/advertiser/BrandCustomizer";
 import { CohortVisualizer } from "../components/advertiser/CohortVisualizer";
 import { NotificationProvider } from "../context/NotificationContext";
+import { ContractTTLRestorer } from "../components/advertiser/ContractTTLRestorer";
+import { STELLAR_CONFIG } from "../config/stellar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import {
   ArrowRight,
@@ -146,6 +148,12 @@ const AdvertiserOverview: React.FC<AdvertiserOverviewProps> = ({ onTabChange }) 
           </Button>
         </div>
       </div>
+
+      {/* Live Soroban Contract TTL Health & Restorer */}
+      <ContractTTLRestorer
+        contractAddress={STELLAR_CONFIG.contractId}
+        campaignName="Primary Campaign Escrow"
+      />
 
       {/* Bento Grid Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">

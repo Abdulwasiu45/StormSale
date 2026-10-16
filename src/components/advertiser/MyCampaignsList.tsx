@@ -3,13 +3,13 @@ import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import {
   Plus,
+  Play,
+  Pause,
+  Settings,
   Users,
   BarChart3,
   TrendingUp,
   Eye,
-  Pause,
-  Play,
-  Settings,
   Search,
   Shield,
   AlertTriangle,
@@ -17,11 +17,20 @@ import {
   CheckCircle2,
   Coins,
   Wallet,
+  Clock,
+  Sparkles,
+  AlertCircle,
 } from "lucide-react";
 import { Input } from "../../components/ui/input";
 import { useWeb3 } from "../../hooks/useWeb3";
 import { useNotification } from "../../context/NotificationContext";
 import { formatStellarAddress } from "../../lib/stellar";
+import { ContractTTLBadge } from "./ContractTTLBadge";
+import {
+  calculateTTLHealth,
+  formatLedgerDuration,
+  extendContractInstanceTTL,
+} from "../../lib/contractTTL";
 
 export type CampaignStatus = "Active" | "Paused" | "Completed";
 
@@ -40,6 +49,7 @@ export interface Campaign {
   escrowInitial: number; // Initial escrow budget (XLM)
   escrowBalance: number; // Current remaining escrow balance (XLM)
   isRefunded?: boolean;
+  ttlRemainingLedgers: number;
 }
 
 export const initialMockCampaigns: Campaign[] = [
@@ -57,6 +67,8 @@ export const initialMockCampaigns: Campaign[] = [
     contractAddress: "CA7Q...1234",
     escrowInitial: 5000,
     escrowBalance: 3250, // 65.0% - Healthy
+    isRefunded: false,
+    ttlRemainingLedgers: 7850, // Low TTL (< 10k ledgers) - requires restoration!
   },
   {
     id: "2",
@@ -72,6 +84,8 @@ export const initialMockCampaigns: Campaign[] = [
     contractAddress: "CB9E...5678",
     escrowInitial: 10000,
     escrowBalance: 750, // 7.5% - LOW ESCROW ALERT (< 10%)
+    isRefunded: false,
+    ttlRemainingLedgers: 420000, // Healthy
   },
   {
     id: "3",
@@ -87,6 +101,8 @@ export const initialMockCampaigns: Campaign[] = [
     contractAddress: "CC2K...9012",
     escrowInitial: 8000,
     escrowBalance: 680, // 8.5% - LOW ESCROW ALERT (< 10%)
+    isRefunded: false,
+    ttlRemainingLedgers: 38000, // Warning
   },
   {
     id: "4",
@@ -103,6 +119,7 @@ export const initialMockCampaigns: Campaign[] = [
     escrowInitial: 3000,
     escrowBalance: 1200, // Ended campaign with 1,200 XLM unused escrow - REFUNDABLE
     isRefunded: false,
+    ttlRemainingLedgers: 12000,
   },
   {
     id: "5",
@@ -119,8 +136,11 @@ export const initialMockCampaigns: Campaign[] = [
     escrowInitial: 4000,
     escrowBalance: 0,
     isRefunded: true, // Already refunded
+    ttlRemainingLedgers: 0, // Archived
   },
 ];
+
+export const mockCampaigns = initialMockCampaigns;
 
 const statusConfig: Record<CampaignStatus, { badge: string; dot: string }> = {
   Active: {
@@ -142,14 +162,64 @@ export const MyCampaignsList = () => {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<CampaignStatus | "All" | "LowEscrow">("All");
   const [refundingCampaignId, setRefundingCampaignId] = useState<string | null>(null);
+  const [extendingId, setExtendingId] = useState<string | null>(null);
 
-  const { refundCampaignEscrow, isConnected, userAddress } = useWeb3();
+  const { refundCampaignEscrow, isConnected, userAddress, connectorType } = useWeb3();
   const { showNotification } = useNotification();
 
   // Low balance threshold: < 10%
   const isCampaignLowEscrow = (c: Campaign) => {
     if (c.status === "Completed" || c.escrowInitial <= 0) return false;
-    return c.escrowBalance / c.escrowInitial < 0.10 && c.escrowBalance > 0;
+    return c.escrowBalance / c.escrowInitial < 0.1 && c.escrowBalance > 0;
+  };
+
+  const lowTTLCount = campaigns.filter(
+    (c) => c.status === "Active" && c.ttlRemainingLedgers < 10000,
+  ).length;
+
+  const handleExtendCampaignTTL = async (campaignId: string, contractAddress: string) => {
+    try {
+      setExtendingId(campaignId);
+      showNotification({
+        type: "info",
+        title: "Submitting State Rent Extension",
+        message: `Extending contract ${contractAddress} by 500,000 ledgers...`,
+      });
+
+      const res = await extendContractInstanceTTL({
+        contractId: contractAddress,
+        callerAddress: userAddress || "GDX7...MOCK",
+        extendToLedgers: 500000,
+        walletType: (connectorType as any) || "freighter",
+      });
+
+      if (res.success) {
+        setCampaigns((prev) =>
+          prev.map((c) =>
+            c.id === campaignId
+              ? {
+                  ...c,
+                  ttlRemainingLedgers: c.ttlRemainingLedgers + 500000,
+                }
+              : c,
+          ),
+        );
+
+        showNotification({
+          type: "success",
+          title: "Contract State Rent Extended!",
+          message: `Campaign contract state extended by 500,000 ledgers (~28.9 days).`,
+        });
+      }
+    } catch (err: any) {
+      showNotification({
+        type: "error",
+        title: "Extension Failed",
+        message: err?.message || "Failed to extend contract state rent.",
+      });
+    } finally {
+      setExtendingId(null);
+    }
   };
 
   const handleRefund = async (campaign: Campaign) => {
@@ -234,9 +304,58 @@ export const MyCampaignsList = () => {
     (acc, c) => acc + parseInt(c.totalRevenue.replace(/\D/g, "")),
     0,
   );
+  const totalCommissions = campaigns.reduce(
+    (acc, c) => acc + parseInt(c.totalCommissions.replace(/\D/g, "")),
+    0,
+  );
 
   return (
     <div className="space-y-8">
+      {/* Automatic Warning Banner when any campaign has low TTL (< 10,000 ledgers) */}
+      {lowTTLCount > 0 && (
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="relative overflow-hidden bg-rose-500/10 border border-rose-500/30 rounded-3xl p-6 text-rose-700 dark:text-rose-300 backdrop-blur-md shadow-lg shadow-rose-500/5"
+        >
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 rounded-2xl bg-rose-500/20 text-rose-600 dark:text-rose-400 mt-0.5">
+                <AlertCircle className="w-6 h-6 animate-pulse" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold flex items-center gap-2">
+                  <span>
+                    Critical State Rent Alert: {lowTTLCount} Campaign(s) Nearing Archival
+                  </span>
+                </h3>
+                <p className="text-sm text-rose-600/90 dark:text-rose-300/90 mt-1 max-w-2xl">
+                  One or more active campaigns have dropped below the safe persistent instance TTL
+                  threshold (&lt; 10,000 ledgers). Extend their contract rent to prevent smart
+                  contract archival and maintain active tracking.
+                </p>
+              </div>
+            </div>
+
+            <Button
+              onClick={() => {
+                const urgentCampaign = campaigns.find(
+                  (c) => c.status === "Active" && c.ttlRemainingLedgers < 10000,
+                );
+                if (urgentCampaign) {
+                  handleExtendCampaignTTL(urgentCampaign.id, urgentCampaign.contractAddress);
+                }
+              }}
+              disabled={extendingId !== null}
+              className="w-full md:w-auto bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-2xl px-6 py-3 shadow-md shadow-rose-600/20 flex items-center justify-center gap-2"
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>Restore Urgent Contract (+500k)</span>
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center bg-white dark:bg-zinc-900/50 p-6 md:p-8 rounded-3xl border border-slate-200 dark:border-zinc-800 shadow-sm">
         <div>
@@ -480,7 +599,10 @@ export const MyCampaignsList = () => {
                       </div>
                       <div className="font-mono font-bold text-zinc-900 dark:text-white">
                         <span>{campaign.escrowBalance.toLocaleString()}</span>
-                        <span className="text-zinc-400 font-normal"> / {campaign.escrowInitial.toLocaleString()} XLM</span>
+                        <span className="text-zinc-400 font-normal">
+                          {" "}
+                          / {campaign.escrowInitial.toLocaleString()} XLM
+                        </span>
                         <span
                           className={`ml-2 text-xs font-bold ${
                             isLowBalance
@@ -518,6 +640,37 @@ export const MyCampaignsList = () => {
                     )}
                   </div>
 
+                  {/* Soroban Contract TTL Health Row */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-2xl bg-slate-50 dark:bg-zinc-950/60 border border-slate-100 dark:border-zinc-800/60 mb-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Clock className="w-3.5 h-3.5 text-indigo-500" />
+                      <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                        State Rent:
+                      </span>
+                      <ContractTTLBadge
+                        status={calculateTTLHealth(campaign.ttlRemainingLedgers)}
+                        remainingLedgers={campaign.ttlRemainingLedgers}
+                        durationText={formatLedgerDuration(campaign.ttlRemainingLedgers)}
+                      />
+                    </div>
+                    <Button
+                      size="sm"
+                      variant={campaign.ttlRemainingLedgers < 10000 ? "default" : "outline"}
+                      disabled={extendingId === campaign.id}
+                      onClick={() => handleExtendCampaignTTL(campaign.id, campaign.contractAddress)}
+                      className={`h-7 text-xs rounded-xl font-bold px-3 py-1 flex items-center gap-1 ${
+                        campaign.ttlRemainingLedgers < 10000
+                          ? "bg-rose-600 hover:bg-rose-500 text-white shadow-sm shadow-rose-600/30 animate-pulse"
+                          : "border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/20"
+                      }`}
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      <span>
+                        {campaign.ttlRemainingLedgers < 10000 ? "Restore (+500k)" : "Extend"}
+                      </span>
+                    </Button>
+                  </div>
+
                   {/* Metrics grid */}
                   <div className="grid grid-cols-3 gap-3">
                     {[
@@ -544,7 +697,7 @@ export const MyCampaignsList = () => {
                   </div>
 
                   {/* Details row */}
-                  <div className="flex items-center gap-4 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+                  <div className="flex items-center gap-4 text-xs font-semibold text-zinc-500 dark:text-zinc-400 mb-2">
                     <span className="flex items-center gap-1">
                       <TrendingUp className="w-3.5 h-3.5" />
                       {campaign.commissionRate}% commission
@@ -563,7 +716,9 @@ export const MyCampaignsList = () => {
                         {campaign.isRefunded ? (
                           <div className="w-full h-11 rounded-xl bg-slate-100 dark:bg-zinc-800/60 border border-slate-200 dark:border-zinc-700/60 flex items-center justify-center text-xs font-bold text-zinc-500 dark:text-zinc-400 space-x-2">
                             <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                            <span>Escrow Refunded ({campaign.escrowInitial.toLocaleString()} XLM Settled)</span>
+                            <span>
+                              Escrow Refunded ({campaign.escrowInitial.toLocaleString()} XLM Settled)
+                            </span>
                           </div>
                         ) : (
                           <Button
