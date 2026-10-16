@@ -1,6 +1,10 @@
-import React from "react";
+
+import React, { useEffect, useState } from "react";
 import { Web3Provider } from "./context/Web3Context";
-import { NotificationProvider, NotificationWrapper } from "./context/NotificationContext";
+import {
+  NotificationProvider,
+  NotificationWrapper,
+} from "./context/NotificationContext";
 import { Landing } from "./pages/Landing";
 import { Dashboard } from "./pages/Dashboard";
 import { Advertiser } from "./pages/Advertiser";
@@ -8,14 +12,15 @@ import { Affiliate } from "./pages/Affiliate";
 import { Auditor } from "./pages/Auditor";
 import { useWeb3 } from "./hooks/useWeb3";
 import { usePreference } from "./hooks/usePreference";
-
 import { ConnectWalletModal } from "./components/shared/ConnectWalletModal";
+import { BrandedCampaignView } from "./components/shared/BrandedCampaignView";
+import { loadBrandConfig } from "./lib/branding";
 
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
   { hasError: boolean; error?: Error }
 > {
-  constructor(props: any) {
+  constructor(props: { children: React.ReactNode }) {
     super(props);
     this.state = { hasError: false };
   }
@@ -24,8 +29,7 @@ class ErrorBoundary extends React.Component<
     return { hasError: true, error };
   }
 
-  componentDidCatch(error: Error, info: any) {
-    // You can log error to an external service here
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
     console.error("Unhandled error caught by ErrorBoundary:", error, info);
   }
 
@@ -34,9 +38,12 @@ class ErrorBoundary extends React.Component<
       return (
         <div className="min-h-screen flex items-center justify-center p-4">
           <div className="max-w-lg text-center">
-            <h2 className="text-2xl font-bold mb-2">Something went wrong</h2>
+            <h2 className="text-2xl font-bold mb-2">
+              Something went wrong
+            </h2>
             <p className="text-sm text-muted-foreground mb-4">
-              An unexpected error occurred. Please refresh the page or try again later.
+              An unexpected error occurred. Please refresh the page or try
+              again later.
             </p>
             <button
               onClick={() => window.location.reload()}
@@ -53,36 +60,90 @@ class ErrorBoundary extends React.Component<
   }
 }
 
-const VALID_PAGES = ["dashboard", "advertiser", "affiliate", "auditor"] as const;
+const VALID_PAGES = [
+  "dashboard",
+  "advertiser",
+  "affiliate",
+  "auditor",
+] as const;
+
 type Page = (typeof VALID_PAGES)[number];
 
 function Router() {
   const { isConnected } = useWeb3();
+
   const [currentPage, setCurrentPage] = usePreference<Page>(
     "stormsale.app.currentPage",
     "dashboard",
-    (v) => VALID_PAGES.includes(v as Page),
+    (value) => VALID_PAGES.includes(value as Page),
   );
 
-  // When the wallet disconnects, always land back on dashboard
-  const handleNavigate = (page: string) => setCurrentPage(page as Page);
+  const [activeBrandSubdomain, setActiveBrandSubdomain] = useState<
+    string | null
+  >(() => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    return params.get("brand") || params.get("c") || null;
+  });
+
+  useEffect(() => {
+    if (!isConnected) {
+      setCurrentPage("dashboard");
+    }
+  }, [isConnected, setCurrentPage]);
+
+  const handleNavigate = (page: string) => {
+    if (VALID_PAGES.includes(page as Page)) {
+      setCurrentPage(page as Page);
+    }
+  };
+
+  if (activeBrandSubdomain) {
+    return (
+      <BrandedCampaignView
+        brandConfig={loadBrandConfig(activeBrandSubdomain)}
+        onClose={() => {
+          setActiveBrandSubdomain(null);
+          window.history.pushState({}, "", window.location.pathname);
+        }}
+        isStandalone
+      />
+    );
+  }
 
   return (
     <>
       <ConnectWalletModal />
+
       {!isConnected ? (
         <Landing />
       ) : (
         <div className="min-h-screen bg-background">
           <main>
-            {currentPage === "dashboard" && <Dashboard onNavigate={handleNavigate} />}
+            {currentPage === "dashboard" && (
+              <Dashboard onNavigate={handleNavigate} />
+            )}
+
             {currentPage === "advertiser" && (
-              <Advertiser onBack={() => handleNavigate("dashboard")} />
+              <Advertiser
+                onBack={() => handleNavigate("dashboard")}
+              />
             )}
+
             {currentPage === "affiliate" && (
-              <Affiliate onBack={() => handleNavigate("dashboard")} />
+              <Affiliate
+                onBack={() => handleNavigate("dashboard")}
+              />
             )}
-            {currentPage === "auditor" && <Auditor onBack={() => handleNavigate("dashboard")} />}
+
+            {currentPage === "auditor" && (
+              <Auditor
+                onBack={() => handleNavigate("dashboard")}
+              />
+            )}
           </main>
         </div>
       )}

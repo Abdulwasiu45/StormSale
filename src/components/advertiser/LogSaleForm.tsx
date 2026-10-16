@@ -1,3 +1,4 @@
+
 import { useState } from "react";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -18,6 +19,7 @@ import {
   getPublicKeyForAddress,
 } from "../../lib/crypto";
 import { logSaleSchema, getFieldErrors } from "../../lib/validation";
+import { triggerConversionPostback } from "../../lib/webhookEngine";
 import { Shield, Zap, Users, FileKey } from "lucide-react";
 
 export const LogSaleForm = () => {
@@ -31,10 +33,11 @@ export const LogSaleForm = () => {
   const { getCampaignContract, userAddress } = useWeb3();
   const { showNotification } = useNotification();
 
-  const clearError = (field: string) =>
+  const clearError = (field: string) => {
     setErrors((prev) => ({ ...prev, [field]: "" }));
+  };
 
-  const handleLogSale = async (e: React.FormEvent) => {
+  const handleLogSale = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setErrors({});
 
@@ -50,8 +53,18 @@ export const LogSaleForm = () => {
       return;
     }
 
+    if (!userAddress) {
+      showNotification({
+        type: "error",
+        title: "Wallet Not Connected",
+        message: "Connect your wallet before logging a sale.",
+      });
+      return;
+    }
+
     const { data } = result;
     setIsLoading(true);
+
     try {
       const campaignContract = getCampaignContract(data.campaignAddress);
 
@@ -70,13 +83,22 @@ export const LogSaleForm = () => {
         timestamp: new Date().toISOString(),
         metadata: "Additional sale information",
       };
+
       const encryptedPayload = await encryptPayload(payload, aesKey);
 
-      const advertiserPublicKey = await getPublicKeyForAddress(userAddress!);
-      const affiliatePublicKey = await getPublicKeyForAddress(data.affiliateAddress);
+      const advertiserPublicKey = await getPublicKeyForAddress(userAddress);
+      const affiliatePublicKey = await getPublicKeyForAddress(
+        data.affiliateAddress,
+      );
 
-      const advertiserWrappedKey = await wrapAESKey(aesKey, advertiserPublicKey);
-      const affiliateWrappedKey = await wrapAESKey(aesKey, affiliatePublicKey);
+      const advertiserWrappedKey = await wrapAESKey(
+        aesKey,
+        advertiserPublicKey,
+      );
+      const affiliateWrappedKey = await wrapAESKey(
+        aesKey,
+        affiliatePublicKey,
+      );
 
       showNotification({
         type: "info",
@@ -94,22 +116,62 @@ export const LogSaleForm = () => {
 
       await tx.wait();
 
+      try {
+        const postbackTxHash =
+          tx?.hash || tx?.id || "PENDING_CONFIRMED_LEDGER_TX";
+
+        const postbacks = await triggerConversionPostback({
+          saleId: payload.saleId,
+          campaignAddress: data.campaignAddress,
+          affiliateAddress: data.affiliateAddress,
+          advertiserAddress: userAddress,
+          saleAmount: data.saleAmount,
+          currency: "XLM",
+          stellarTxHash: postbackTxHash,
+          ledgerTimestamp: new Date().toISOString(),
+          customerRef: data.customerData
+            ? `REF_${payload.saleId.slice(-8)}`
+            : "Anonymous Customer",
+          status: "CONFIRMED_ON_LEDGER",
+        });
+
+        if (postbacks.length > 0) {
+          showNotification({
+            type: "info",
+            title: "Webhooks Dispatched",
+            message: `Automated postback queued for ${postbacks.length} active endpoint(s).`,
+          });
+        }
+      } catch (webhookErr) {
+        console.warn("Conversion postback warning:", webhookErr);
+
+        showNotification({
+          type: "warning",
+          title: "Postback Notice",
+          message:
+            "Sale confirmed on-chain, but automated webhook dispatch encountered an issue. You can review or retry from the Webhook Manager tab.",
+        });
+      }
+
       showNotification({
         type: "success",
         title: "Sale Logged Successfully!",
-        message: "Encrypted sale data has been recorded on-chain",
+        message: "Encrypted sale data has been recorded on-chain.",
       });
 
       setAffiliateAddress("");
       setSaleAmount("");
       setCampaignAddress("");
       setCustomerData("");
-    } catch (error: any) {
+      setErrors({});
+    } catch (error: unknown) {
       console.error("Error logging sale:", error);
+
       showNotification({
         type: "error",
         title: "Logging Failed",
-        message: error.message || "Failed to log sale",
+        message:
+          error instanceof Error ? error.message : "Failed to log sale.",
       });
     } finally {
       setIsLoading(false);
@@ -155,7 +217,10 @@ export const LogSaleForm = () => {
               >
                 <Input
                   value={campaignAddress}
-                  onChange={(e) => { setCampaignAddress(e.target.value); clearError("campaignAddress"); }}
+                  onChange={(e) => {
+                    setCampaignAddress(e.target.value);
+                    clearError("campaignAddress");
+                  }}
                   placeholder="CCAMPAIGN... (56-char Soroban Contract Address)"
                   variant={errors.campaignAddress ? "error" : "default"}
                   className="h-12 border-slate-200 dark:border-zinc-800 focus:ring-indigo-600 dark:focus:ring-indigo-500 rounded-xl bg-slate-50 dark:bg-zinc-950 font-mono"
@@ -171,7 +236,10 @@ export const LogSaleForm = () => {
                 >
                   <Input
                     value={affiliateAddress}
-                    onChange={(e) => { setAffiliateAddress(e.target.value); clearError("affiliateAddress"); }}
+                    onChange={(e) => {
+                      setAffiliateAddress(e.target.value);
+                      clearError("affiliateAddress");
+                    }}
                     placeholder="GAFFILIATE... (56-char Stellar Public Key)"
                     variant={errors.affiliateAddress ? "error" : "default"}
                     className="h-12 border-slate-200 dark:border-zinc-800 focus:ring-indigo-600 dark:focus:ring-indigo-500 rounded-xl bg-slate-50 dark:bg-zinc-950 font-mono"
@@ -190,7 +258,10 @@ export const LogSaleForm = () => {
                       step="0.0000001"
                       min="0"
                       value={saleAmount}
-                      onChange={(e) => { setSaleAmount(e.target.value); clearError("saleAmount"); }}
+                      onChange={(e) => {
+                        setSaleAmount(e.target.value);
+                        clearError("saleAmount");
+                      }}
                       placeholder="e.g., 100.50"
                       variant={errors.saleAmount ? "error" : "default"}
                       className="h-12 border-slate-200 dark:border-zinc-800 focus:ring-indigo-600 dark:focus:ring-indigo-500 rounded-xl bg-slate-50 dark:bg-zinc-950"
@@ -209,14 +280,16 @@ export const LogSaleForm = () => {
               >
                 <Input
                   value={customerData}
-                  onChange={(e) => { setCustomerData(e.target.value); clearError("customerData"); }}
+                  onChange={(e) => {
+                    setCustomerData(e.target.value);
+                    clearError("customerData");
+                  }}
                   placeholder="Customer name, email, or reference ID"
                   variant={errors.customerData ? "error" : "default"}
                   className="h-12 border-slate-200 dark:border-zinc-800 focus:ring-indigo-600 dark:focus:ring-indigo-500 rounded-xl bg-slate-50 dark:bg-zinc-950"
                 />
               </InputField>
 
-              {/* Encryption Flow Visualization */}
               <div className="bg-slate-50 dark:bg-zinc-950/50 p-6 rounded-2xl border border-slate-100 dark:border-zinc-800/50">
                 <h4 className="font-bold text-zinc-900 dark:text-white uppercase tracking-wider text-xs mb-6 flex items-center">
                   <FileKey className="w-4 h-4 mr-2 text-indigo-500" />
@@ -229,10 +302,14 @@ export const LogSaleForm = () => {
                     { step: "3", label: "Get Public Keys", icon: Users },
                     { step: "4", label: "Wrap Keys", icon: FileKey },
                     { step: "5", label: "Store On-Chain", icon: Shield },
-                  ].map((item, index) => {
+                  ].map((item) => {
                     const IconComponent = item.icon;
+
                     return (
-                      <div key={index} className="flex flex-col items-center">
+                      <div
+                        key={item.step}
+                        className="flex flex-col items-center"
+                      >
                         <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-400 rounded-full flex items-center justify-center text-sm font-bold mb-3 border border-indigo-200 dark:border-indigo-500/30">
                           {item.step}
                         </div>
