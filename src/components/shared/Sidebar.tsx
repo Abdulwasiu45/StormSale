@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import type { LucideIcon } from "lucide-react";
 import { ChevronLeft, ChevronRight, Shield, LogOut, Menu, X, Layers } from "lucide-react";
 import { useWeb3 } from "../../hooks/useWeb3";
+import { usePreference } from "../../hooks/usePreference";
 
 interface SidebarProps {
   activeTab: string;
@@ -23,7 +24,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onBack,
   roleName,
 }) => {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = usePreference<boolean>(
+    "stormsale.sidebar.collapsed",
+    false,
+  );
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
   const { disconnectWallet } = useWeb3();
 

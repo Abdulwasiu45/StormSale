@@ -7,8 +7,8 @@ import { Advertiser } from "./pages/Advertiser";
 import { Affiliate } from "./pages/Affiliate";
 import { Auditor } from "./pages/Auditor";
 import { useWeb3 } from "./hooks/useWeb3";
+import { usePreference } from "./hooks/usePreference";
 
-import { useState } from "react";
 import { ConnectWalletModal } from "./components/shared/ConnectWalletModal";
 
 class ErrorBoundary extends React.Component<
@@ -53,9 +53,19 @@ class ErrorBoundary extends React.Component<
   }
 }
 
+const VALID_PAGES = ["dashboard", "advertiser", "affiliate", "auditor"] as const;
+type Page = (typeof VALID_PAGES)[number];
+
 function Router() {
   const { isConnected } = useWeb3();
-  const [currentPage, setCurrentPage] = useState("dashboard");
+  const [currentPage, setCurrentPage] = usePreference<Page>(
+    "stormsale.app.currentPage",
+    "dashboard",
+    (v) => VALID_PAGES.includes(v as Page),
+  );
+
+  // When the wallet disconnects, always land back on dashboard
+  const handleNavigate = (page: string) => setCurrentPage(page as Page);
 
   return (
     <>
@@ -65,14 +75,14 @@ function Router() {
       ) : (
         <div className="min-h-screen bg-background">
           <main>
-            {currentPage === "dashboard" && <Dashboard onNavigate={setCurrentPage} />}
+            {currentPage === "dashboard" && <Dashboard onNavigate={handleNavigate} />}
             {currentPage === "advertiser" && (
-              <Advertiser onBack={() => setCurrentPage("dashboard")} />
+              <Advertiser onBack={() => handleNavigate("dashboard")} />
             )}
             {currentPage === "affiliate" && (
-              <Affiliate onBack={() => setCurrentPage("dashboard")} />
+              <Affiliate onBack={() => handleNavigate("dashboard")} />
             )}
-            {currentPage === "auditor" && <Auditor onBack={() => setCurrentPage("dashboard")} />}
+            {currentPage === "auditor" && <Auditor onBack={() => handleNavigate("dashboard")} />}
           </main>
         </div>
       )}

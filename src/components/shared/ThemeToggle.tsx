@@ -1,25 +1,20 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { Moon, Sun } from "lucide-react";
+import { usePreference } from "../../hooks/usePreference";
 
 export function ThemeToggle() {
-  const [darkMode, setDarkMode] = useState(false);
+  const [darkMode, setDarkMode] = usePreference<boolean>("stormsale.theme.dark", false);
 
+  // Apply class on mount and whenever the value changes
   useEffect(() => {
-    const isDark = localStorage.getItem("darkMode") === "true";
-    setDarkMode(isDark);
-    document.documentElement.classList.toggle("dark", isDark);
-  }, []);
+    document.documentElement.classList.toggle("dark", darkMode);
+  }, [darkMode]);
 
-  const toggleDarkMode = () => {
-    const newDarkMode = !darkMode;
-    setDarkMode(newDarkMode);
-    localStorage.setItem("darkMode", newDarkMode.toString());
-    document.documentElement.classList.toggle("dark", newDarkMode);
-  };
+  const toggle = () => setDarkMode(!darkMode);
 
   return (
     <button
-      onClick={toggleDarkMode}
+      onClick={toggle}
       className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-slate-100 dark:hover:bg-zinc-900 text-zinc-600 dark:text-zinc-400 transition-colors"
       aria-label="Toggle dark mode"
     >

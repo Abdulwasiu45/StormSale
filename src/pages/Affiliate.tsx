@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Sidebar } from "../components/shared/Sidebar";
 import { JoinCampaignButton } from "../components/affiliate/JoinCampaignButton";
 import { SalesList } from "../components/affiliate/SalesList";
@@ -6,14 +5,29 @@ import { ClaimPayouts } from "../components/affiliate/ClaimPayouts";
 import { AffiliateOverview } from "../components/affiliate/AffiliateOverview";
 import { Users, TrendingUp, DollarSign, BarChart3, Shield, LayoutDashboard } from "lucide-react";
 import { NotificationProvider } from "../context/NotificationContext";
+import { usePreference } from "../hooks/usePreference";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface AffiliateProps {
   onBack: () => void;
 }
 
+const AFFILIATE_TABS = [
+  "overview",
+  "join-campaign",
+  "my-sales",
+  "claim-payouts",
+  "performance",
+  "security",
+] as const;
+type AffiliateTab = (typeof AFFILIATE_TABS)[number];
+
 const AffiliateContent: React.FC<AffiliateProps> = ({ onBack }) => {
-  const [activeTab, setActiveTab] = useState("overview");
+  const [activeTab, setActiveTab] = usePreference<AffiliateTab>(
+    "stormsale.affiliate.tab",
+    "overview",
+    (v) => AFFILIATE_TABS.includes(v as AffiliateTab),
+  );
 
   const tabs = [
     { id: "overview", label: "Dashboard Overview", icon: LayoutDashboard },
@@ -43,7 +57,7 @@ const AffiliateContent: React.FC<AffiliateProps> = ({ onBack }) => {
     <div className="flex flex-col lg:flex-row min-h-screen bg-slate-50 dark:bg-zinc-950 font-sans selection:bg-indigo-500/30">
       <Sidebar
         activeTab={activeTab}
-        onTabChange={setActiveTab}
+        onTabChange={(tab) => setActiveTab(tab as AffiliateTab)}
         tabs={tabs}
         onBack={onBack}
         roleName="Affiliate Pro"
