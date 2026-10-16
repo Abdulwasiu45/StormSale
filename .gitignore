@@ -38,3 +38,8 @@ generate_commits.sh
 *.sln
 *.sw?
 lens/
+
+# Playwright
+test-results/
+playwright-report/
+e2e-results.json

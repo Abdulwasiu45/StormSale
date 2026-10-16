@@ -25,6 +25,8 @@
     "security:check": "node scripts/check-security-headers.cjs",
     "security:malware": "node scripts/malware-scanner.cjs",
     "release": "semantic-release",
+    "test:e2e": "playwright test",
+    "test:e2e:install": "playwright install --with-deps chromium firefox webkit",
     "preview": "vite preview",
     "format": "prettier --write .",
     "prepare": "husky"
@@ -52,6 +54,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.64.1",
     "@semantic-release/changelog": "^7.0.0",
     "@semantic-release/git": "^11.0.1",
     "@semantic-release/github": "^12.0.10",
