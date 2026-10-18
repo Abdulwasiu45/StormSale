@@ -8,6 +8,8 @@ import {
   generateMerkleProof,
   verifyMerkleProofStepByStep,
   findLeafByTxHash,
+  parseTransactionHashFromReceipt,
+  calculateCommissionPercentage,
 } from "../utils/merkle";
 
 describe("MerkleTreeVisualizer Component & Cryptographic Engine Suite", () => {
@@ -63,8 +65,8 @@ describe("MerkleTreeVisualizer Component & Cryptographic Engine Suite", () => {
       </NotificationProvider>,
     );
 
-    expect(htmlSale).toContain("BATCH-2026-05-15-02");
-    expect(htmlSale).toContain("Web3 Masterclass");
+    expect(htmlSale).not.toContain("No Settlement Batch Found");
+    expect(htmlSale).toContain(`#${SAMPLE_SETTLEMENT_BATCHES[1].ledgerSequence.toLocaleString()}`);
 
     // Matching by transaction hash in Batch 2
     const targetTx = SAMPLE_SETTLEMENT_BATCHES[2].orders[0].txHash;
@@ -74,8 +76,7 @@ describe("MerkleTreeVisualizer Component & Cryptographic Engine Suite", () => {
       </NotificationProvider>,
     );
 
-    expect(htmlTx).toContain("BATCH-2026-05-14-03");
-    expect(htmlTx).toContain("Summer Sale 2026");
+    expect(htmlTx).toContain(`#${SAMPLE_SETTLEMENT_BATCHES[2].ledgerSequence.toLocaleString()}`);
   });
 
   it("renders explicit initialBatchIndex cleanly", () => {
@@ -85,8 +86,7 @@ describe("MerkleTreeVisualizer Component & Cryptographic Engine Suite", () => {
       </NotificationProvider>,
     );
 
-    expect(html).toContain("BATCH-2026-05-14-03");
-    expect(html).toContain("Summer Sale 2026");
+    expect(html).toContain(`#${SAMPLE_SETTLEMENT_BATCHES[2].ledgerSequence.toLocaleString()}`);
   });
 
   it("disables Export Audit Proof JSON button and shows neutral prompt when verificationResult is null", () => {
@@ -98,10 +98,10 @@ describe("MerkleTreeVisualizer Component & Cryptographic Engine Suite", () => {
     );
 
     expect(html).toContain("Select a Leaf to Verify Inclusion Proof");
-    expect(html).toContain("disabled=\"\"");
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>(?:(?!<\/button>).)*Export Audit Proof JSON/s);
   });
 
-  it("parses transaction hash uploads across JSON receipts, CSV rows, and plain text", async () => {
+  it("parses transaction hash uploads across JSON receipts, CSV rows, and plain text using parseTransactionHashFromReceipt", async () => {
     const targetTx = SAMPLE_SETTLEMENT_BATCHES[0].orders[2].txHash;
     const tree = await buildMerkleTree(SAMPLE_SETTLEMENT_BATCHES[0].orders);
 
@@ -111,21 +111,21 @@ describe("MerkleTreeVisualizer Component & Cryptographic Engine Suite", () => {
       txHash: targetTx,
       status: "Settled",
     });
-    const parsedJson = JSON.parse(jsonReceipt);
-    expect(parsedJson.txHash).toBe(targetTx);
-    expect(findLeafByTxHash(tree, parsedJson.txHash)?.index).toBe(2);
+    const candidateFromJson = parseTransactionHashFromReceipt(jsonReceipt, true);
+    expect(candidateFromJson).toBe(targetTx);
+    expect(findLeafByTxHash(tree, candidateFromJson!)?.index).toBe(2);
 
     // 2. CSV line
     const csvLine = `ORD-9403,${targetTx},450,2026-05-16`;
-    const matchCsv = csvLine.match(/0x[a-fA-F0-9]{64}/);
-    expect(matchCsv?.[0]).toBe(targetTx);
-    expect(findLeafByTxHash(tree, matchCsv?.[0] || "")?.index).toBe(2);
+    const candidateFromCsv = parseTransactionHashFromReceipt(csvLine, false);
+    expect(candidateFromCsv).toBe(targetTx);
+    expect(findLeafByTxHash(tree, candidateFromCsv!)?.index).toBe(2);
 
     // 3. Plaintext without 0x
     const raw64 = targetTx.replace(/^0x/, "");
-    const matchRaw = raw64.match(/[a-fA-F0-9]{64}/);
-    expect(`0x${matchRaw?.[0]}`).toBe(targetTx);
-    expect(findLeafByTxHash(tree, `0x${matchRaw?.[0]}`)?.index).toBe(2);
+    const candidateFromRaw = parseTransactionHashFromReceipt(raw64, false);
+    expect(candidateFromRaw).toBe(targetTx);
+    expect(findLeafByTxHash(tree, candidateFromRaw!)?.index).toBe(2);
   });
 
   it("validates that simulated tamper mode genuinely alters computed root and fails verification", async () => {
@@ -156,21 +156,10 @@ describe("MerkleTreeVisualizer Component & Cryptographic Engine Suite", () => {
     expect(tamperedResult.verifiedSteps[0].isVerified).toBe(false);
   });
 
-  it("calculates commission percentage dynamically per order", () => {
-    const order10Pct = { amountXlm: 450, commissionXlm: 45 };
-    const pct10 = ((order10Pct.commissionXlm / order10Pct.amountXlm) * 100).toFixed(0);
-    expect(pct10).toBe("10");
-
-    const order15Pct = { amountXlm: 750, commissionXlm: 112.5 };
-    const pct15 = ((order15Pct.commissionXlm / order15Pct.amountXlm) * 100).toFixed(0);
-    expect(pct15).toBe("15");
-
-    const orderZero = { amountXlm: 0, commissionXlm: 0 };
-    const pctZero =
-      orderZero.amountXlm > 0
-        ? ((orderZero.commissionXlm / orderZero.amountXlm) * 100).toFixed(0)
-        : "0";
-    expect(pctZero).toBe("0");
+  it("calculates commission percentage dynamically per order using calculateCommissionPercentage", () => {
+    expect(calculateCommissionPercentage(450, 45)).toBe("10");
+    expect(calculateCommissionPercentage(750, 112.5)).toBe("15");
+    expect(calculateCommissionPercentage(0, 0)).toBe("0");
   });
 
   it("formats audit proof export payload with full cryptographic verification details", async () => {

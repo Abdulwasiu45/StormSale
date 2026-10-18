@@ -440,6 +440,52 @@ export function findLeafByTxHash(
 }
 
 /**
+ * Extracts a candidate 64-character hex transaction hash from uploaded receipt text (JSON, CSV, or raw text).
+ */
+export function parseTransactionHashFromReceipt(text: string, isJson = false): string | null {
+  if (!text) return null;
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
+  if (isJson) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      const candidate =
+        parsed.txHash ||
+        parsed.transactionHash ||
+        parsed.hash ||
+        (Array.isArray(parsed) && parsed[0]?.txHash) ||
+        null;
+      if (candidate && typeof candidate === "string") {
+        return candidate.trim();
+      }
+    } catch {
+      // Fall back to regex parsing below if JSON parsing fails
+    }
+  }
+
+  const match0x = trimmed.match(/0x[a-fA-F0-9]{64}/);
+  if (match0x) {
+    return match0x[0];
+  }
+
+  const rawMatch = trimmed.match(/[a-fA-F0-9]{64}/);
+  if (rawMatch) {
+    return `0x${rawMatch[0]}`;
+  }
+
+  return null;
+}
+
+/**
+ * Calculates commission percentage dynamically per order without division-by-zero errors.
+ */
+export function calculateCommissionPercentage(amountXlm: number, commissionXlm: number): string {
+  if (!amountXlm || amountXlm <= 0) return "0";
+  return ((commissionXlm / amountXlm) * 100).toFixed(0);
+}
+
+/**
  * Valid RFC 4648 Base32 56-character Ed25519 Stellar public keys (G...) and Soroban contract IDs (C...).
  */
 const STELLAR_FIXTURE_KEYS = {

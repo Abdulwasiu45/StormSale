@@ -14,6 +14,8 @@ import {
   generateMerkleProof,
   verifyMerkleProofStepByStep,
   findLeafByTxHash,
+  parseTransactionHashFromReceipt,
+  calculateCommissionPercentage,
   SAMPLE_SETTLEMENT_BATCHES,
   type MerkleTree,
   type MerkleNode,
@@ -95,7 +97,10 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
         // 2. Exact campaignId / campaignName match (selects first leaf of that batch)
         if (
           batch.campaignName.toLowerCase() === cleanSaleId ||
-          batch.orders.some((o) => o.campaignId.toLowerCase() === cleanSaleId)
+          batch.orders.some((o) => {
+            const cid = o.campaignId.toLowerCase();
+            return cid === cleanSaleId || cid.replace(/^camp-/, "") === cleanSaleId;
+          })
         ) {
           return { batchIndex: bIdx, leafIndex: 0, isUnmatched: false };
         }
@@ -186,6 +191,11 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
       setIsLoadingTree(false);
       return;
     }
+
+    setIsLoadingTree(true);
+    setTree(null);
+    setActiveProof(null);
+    setVerificationResult(null);
 
     buildMerkleTree(currentBatch.orders)
       .then((newTree) => {
@@ -352,25 +362,7 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
     reader.onload = (e) => {
       try {
         const text = e.target?.result as string;
-        let candidateTx = "";
-
-        if (file.name.endsWith(".json")) {
-          const parsed = JSON.parse(text);
-          candidateTx =
-            parsed.txHash ||
-            parsed.transactionHash ||
-            parsed.hash ||
-            (Array.isArray(parsed) && parsed[0]?.txHash) ||
-            "";
-        } else {
-          const match = text.match(/0x[a-fA-F0-9]{64}/);
-          if (match) {
-            candidateTx = match[0];
-          } else {
-            const rawMatch = text.match(/[a-fA-F0-9]{64}/);
-            if (rawMatch) candidateTx = `0x${rawMatch[0]}`;
-          }
-        }
+        const candidateTx = parseTransactionHashFromReceipt(text, file.name.endsWith(".json"));
 
         if (candidateTx) {
           setSearchTxHash(candidateTx);
@@ -540,7 +532,7 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
               Settlement Ledger
             </p>
             <p className="text-base font-extrabold text-zinc-900 dark:text-white mt-1">
-              #{currentBatch.ledgerSequence.toLocaleString()}
+              {`#${currentBatch.ledgerSequence.toLocaleString()}`}
             </p>
             <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
               {currentBatch.settledAt}
@@ -1188,13 +1180,10 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
                     <span className="text-zinc-400">Commission:</span>
                     <span className="font-bold text-emerald-400">
                       {hoveredNode.node.order.commissionXlm} XLM (
-                      {hoveredNode.node.order.amountXlm > 0
-                        ? (
-                            (hoveredNode.node.order.commissionXlm /
-                              hoveredNode.node.order.amountXlm) *
-                            100
-                          ).toFixed(0)
-                        : 0}
+                      {calculateCommissionPercentage(
+                        hoveredNode.node.order.amountXlm,
+                        hoveredNode.node.order.commissionXlm,
+                      )}
                       %)
                     </span>
                   </div>
