@@ -2,6 +2,7 @@ import { Button } from "../../components/ui/button";
 import { useWeb3 } from "../../hooks/useWeb3";
 import { useTelegram } from "../../hooks/useTelegram";
 import { ThemeToggle } from "./ThemeToggle";
+import { TerminologyTooltip, TerminologyGuideButton } from "../ui/tooltip";
 import { Wallet, Menu, X, Coins, ShieldCheck, Send } from "lucide-react";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -64,7 +65,8 @@ export const Header = () => {
         </nav>
 
         {/* Desktop Actions */}
-        <div className="hidden sm:flex items-center space-x-4">
+        <div className="hidden sm:flex items-center space-x-3">
+          <TerminologyGuideButton />
           <ThemeToggle />
 
           {isConnected ? (
@@ -74,9 +76,11 @@ export const Header = () => {
                 <span className="text-xs font-mono font-semibold text-zinc-900 dark:text-white">
                   {userAddress && formatAddress(userAddress)}
                 </span>
-                <span className="text-[10px] font-bold px-1.5 py-0.5 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded">
-                  {xlmBalance} XLM
-                </span>
+                <TerminologyTooltip term="xlm" side="bottom">
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded cursor-help">
+                    {xlmBalance} XLM
+                  </span>
+                </TerminologyTooltip>
               </div>
               <Button
                 variant="outline"
@@ -153,13 +157,19 @@ export const Header = () => {
                 </div>
                 <div className="text-right">
                   <div className="text-[11px] font-bold text-zinc-400">BALANCE</div>
-                  <div className="text-xs font-bold text-indigo-600 dark:text-indigo-400 flex items-center">
-                    <Coins className="w-3 h-3 mr-1" />
-                    {xlmBalance} XLM
-                  </div>
+                  <TerminologyTooltip term="xlm" side="bottom">
+                    <div className="text-xs font-bold text-indigo-600 dark:text-indigo-400 flex items-center cursor-help">
+                      <Coins className="w-3 h-3 mr-1" />
+                      {xlmBalance} XLM
+                    </div>
+                  </TerminologyTooltip>
                 </div>
               </div>
             )}
+
+            <div className="pb-1">
+              <TerminologyGuideButton className="w-full justify-center" />
+            </div>
 
             <div className="grid grid-cols-2 gap-2">
               {navLinks.map((item) => (

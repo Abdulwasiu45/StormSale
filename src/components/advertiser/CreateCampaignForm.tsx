@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { InputField } from "../../components/ui/input-group";
+import { TerminologyTooltip } from "../../components/ui/tooltip";
 import {
   Card,
   CardContent,
@@ -425,7 +426,12 @@ export const CreateCampaignForm = () => {
 
               <div className="grid md:grid-cols-2 gap-6">
                 <InputField
-                  label="Commission Rate"
+                  label={
+                    <span className="inline-flex items-center gap-1.5">
+                      Commission Rate
+                      <TerminologyTooltip term="commission_rate" iconOnly />
+                    </span>
+                  }
                   description="Percentage commission for affiliates (1–50%)"
                   error={errors.commissionRate}
                   required
@@ -452,7 +458,12 @@ export const CreateCampaignForm = () => {
                 </InputField>
 
                 <InputField
-                  label="Campaign Budget"
+                  label={
+                    <span className="inline-flex items-center gap-1.5">
+                      Campaign Budget
+                      <TerminologyTooltip term="escrow" iconOnly />
+                    </span>
+                  }
                   description="Total budget allocated for commissions and escrow deposit"
                   error={errors.budget}
                   required
@@ -492,7 +503,12 @@ export const CreateCampaignForm = () => {
               </div>
 
               <InputField
-                label="Payout Clearing Period"
+                label={
+                  <span className="inline-flex items-center gap-1.5">
+                    Payout Clearing Period
+                    <TerminologyTooltip term="clearing_period" iconOnly />
+                  </span>
+                }
                 description="Time before affiliates can claim commissions (min 1 hour)"
                 error={errors.clearingPeriod}
                 required
