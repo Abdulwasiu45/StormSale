@@ -165,6 +165,15 @@ describe("Merkle Tree Cryptographic Engine & Auditor Inclusion Verification", ()
     const wrongRoot = "1111111111111111111111111111111111111111111111111111111111111111";
     const resultWrongRoot = await verifyMerkleProofStepByStep(proof, wrongRoot);
     expect(resultWrongRoot.isValid).toBe(false);
+
+    // 5. Tampered leafOrder metadata fails verification even if sibling path is valid
+    const tamperedOrderProof = JSON.parse(JSON.stringify(proof));
+    tamperedOrderProof.leafOrder.amountXlm = 999999;
+    const resultTamperedOrder = await verifyMerkleProofStepByStep(
+      tamperedOrderProof,
+      batch.contractRootHash,
+    );
+    expect(resultTamperedOrder.isValid).toBe(false);
   });
 
   it("locates leaf position by transaction hash ignoring case and 0x prefix", async () => {

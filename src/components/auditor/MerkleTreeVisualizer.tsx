@@ -36,6 +36,7 @@ import {
   ChevronLeft,
   FileText,
   AlertTriangle,
+  Clock,
   ZoomIn,
   ZoomOut,
   Maximize2,
@@ -62,43 +63,73 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
 }) => {
   const { showNotification } = useNotification();
 
-  // Determine initial batch from initialSaleId / initialTxHash / initialBatchIndex
-  const resolvedInitialBatchIndex = useMemo(() => {
+  // Match initial batch and leaf from props with exact normalized comparison
+  const initialMatch = useMemo<{
+    batchIndex: number;
+    leafIndex: number;
+    isUnmatched: boolean;
+    unmatchedIdentifier?: string;
+  }>(() => {
     if (
       typeof initialBatchIndex === "number" &&
       initialBatchIndex >= 0 &&
       initialBatchIndex < SAMPLE_SETTLEMENT_BATCHES.length
     ) {
-      return initialBatchIndex;
+      return { batchIndex: initialBatchIndex, leafIndex: 0, isUnmatched: false };
     }
     if (initialSaleId) {
       const cleanSaleId = initialSaleId.trim().toLowerCase();
+      const strippedOrderNum = cleanSaleId.replace(/^ord-/, "");
+
       for (let bIdx = 0; bIdx < SAMPLE_SETTLEMENT_BATCHES.length; bIdx++) {
         const batch = SAMPLE_SETTLEMENT_BATCHES[bIdx];
-        const match = batch.orders.some(
+        // 1. Exact orderId match
+        const orderIdx = batch.orders.findIndex(
           (o) =>
-            o.orderId.toLowerCase().includes(cleanSaleId) ||
-            o.campaignId.toLowerCase().includes(cleanSaleId) ||
-            cleanSaleId.includes(o.orderId.toLowerCase().replace("ord-", "")),
+            o.orderId.toLowerCase() === cleanSaleId ||
+            o.orderId.toLowerCase().replace(/^ord-/, "") === strippedOrderNum,
         );
-        if (match) return bIdx;
+        if (orderIdx >= 0) {
+          return { batchIndex: bIdx, leafIndex: orderIdx, isUnmatched: false };
+        }
+        // 2. Exact campaignId / campaignName match (selects first leaf of that batch)
+        if (
+          batch.campaignName.toLowerCase() === cleanSaleId ||
+          batch.orders.some((o) => o.campaignId.toLowerCase() === cleanSaleId)
+        ) {
+          return { batchIndex: bIdx, leafIndex: 0, isUnmatched: false };
+        }
       }
+      return { batchIndex: -1, leafIndex: -1, isUnmatched: true, unmatchedIdentifier: initialSaleId };
     }
     if (initialTxHash) {
       const cleanTx = initialTxHash.trim().toLowerCase().replace(/^0x/, "");
       for (let bIdx = 0; bIdx < SAMPLE_SETTLEMENT_BATCHES.length; bIdx++) {
         const batch = SAMPLE_SETTLEMENT_BATCHES[bIdx];
-        const match = batch.orders.some(
+        const orderIdx = batch.orders.findIndex(
           (o) => o.txHash.toLowerCase().replace(/^0x/, "") === cleanTx,
         );
-        if (match) return bIdx;
+        if (orderIdx >= 0) {
+          return { batchIndex: bIdx, leafIndex: orderIdx, isUnmatched: false };
+        }
       }
+      return { batchIndex: -1, leafIndex: -1, isUnmatched: true, unmatchedIdentifier: initialTxHash };
     }
-    return 0;
+    return { batchIndex: 0, leafIndex: 0, isUnmatched: false };
   }, [initialBatchIndex, initialSaleId, initialTxHash]);
 
+  const [unmatchedError, setUnmatchedError] = useState<{
+    isUnmatched: boolean;
+    identifier?: string;
+  }>({
+    isUnmatched: initialMatch.isUnmatched,
+    identifier: initialMatch.unmatchedIdentifier,
+  });
+
   // Batch state
-  const [selectedBatchIndex, setSelectedBatchIndex] = useState(resolvedInitialBatchIndex);
+  const [selectedBatchIndex, setSelectedBatchIndex] = useState<number>(
+    initialMatch.isUnmatched ? 0 : initialMatch.batchIndex,
+  );
   const currentBatch = SAMPLE_SETTLEMENT_BATCHES[selectedBatchIndex];
 
   // Tree state
@@ -140,29 +171,30 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
   const [treeOrientation, setTreeOrientation] = useState<"top-down" | "bottom-up">("top-down");
   const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    };
+  }, []);
 
   // 1. Build Merkle tree when batch changes (Reads independent precomputed contractRootHash)
   useEffect(() => {
     let isMounted = true;
+    if (unmatchedError.isUnmatched) {
+      setIsLoadingTree(false);
+      return;
+    }
 
     buildMerkleTree(currentBatch.orders)
       .then((newTree) => {
         if (!isMounted) return;
         setTree(newTree);
 
-        // Find initial leaf if initialSaleId or initialTxHash was supplied
         let initialLeaf = 0;
-        if (initialSaleId) {
-          const cleanSaleId = initialSaleId.trim().toLowerCase();
-          const matchIdx = currentBatch.orders.findIndex(
-            (o) =>
-              o.orderId.toLowerCase().includes(cleanSaleId) ||
-              cleanSaleId.includes(o.orderId.toLowerCase().replace("ord-", "")),
-          );
-          if (matchIdx >= 0) initialLeaf = matchIdx;
-        } else if (initialTxHash) {
-          const match = findLeafByTxHash(newTree, initialTxHash);
-          if (match) initialLeaf = match.index;
+        if (initialMatch.batchIndex === selectedBatchIndex && initialMatch.leafIndex >= 0) {
+          initialLeaf = initialMatch.leafIndex;
         }
 
         setSelectedLeafIndex(initialLeaf);
@@ -180,12 +212,14 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [selectedBatchIndex, currentBatch.orders, initialSaleId, initialTxHash]);
+  }, [selectedBatchIndex, currentBatch.orders, unmatchedError.isUnmatched, initialMatch]);
 
   // 2. Generate proof when selected leaf changes against trusted on-chain root
   useEffect(() => {
     let isMounted = true;
     if (!tree || selectedLeafIndex < 0 || selectedLeafIndex >= tree.leaves.length) {
+      setActiveProof(null);
+      setVerificationResult(null);
       return;
     }
 
@@ -193,7 +227,13 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
       .then((proof) => {
         if (isMounted) setActiveProof(proof);
       })
-      .catch(console.error);
+      .catch((err) => {
+        console.error("Proof generation error:", err);
+        if (isMounted) {
+          setActiveProof(null);
+          setVerificationResult(null);
+        }
+      });
 
     return () => {
       isMounted = false;
@@ -204,6 +244,7 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
   useEffect(() => {
     let isMounted = true;
     if (!activeProof) {
+      setVerificationResult(null);
       return;
     }
 
@@ -217,6 +258,9 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
       })
       .catch((err) => {
         console.error("Verification execution error:", err);
+        if (isMounted) {
+          setVerificationResult(null);
+        }
       });
 
     return () => {
@@ -473,7 +517,10 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
               <select
                 aria-label="Select Settlement Batch"
                 value={selectedBatchIndex}
-                onChange={(e) => setSelectedBatchIndex(Number(e.target.value))}
+                onChange={(e) => {
+                  setSelectedBatchIndex(Number(e.target.value));
+                  setUnmatchedError({ isUnmatched: false });
+                }}
                 className="w-full bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white font-semibold text-sm rounded-xl px-3 py-2 border border-slate-200 dark:border-zinc-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-sm"
               >
                 {SAMPLE_SETTLEMENT_BATCHES.map((b, idx) => (
@@ -539,6 +586,32 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
           </div>
         </div>
       </div>
+
+      {unmatchedError.isUnmatched ? (
+        <Card className="bg-white dark:bg-zinc-900/60 border border-amber-200 dark:border-amber-800/80 rounded-3xl p-8 md:p-12 text-center shadow-sm">
+          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 flex items-center justify-center">
+            <AlertTriangle className="w-8 h-8 text-amber-600 dark:text-amber-400" />
+          </div>
+          <h2 className="text-xl md:text-2xl font-bold text-zinc-900 dark:text-white">
+            No Settlement Batch Found for Identifier: "{unmatchedError.identifier}"
+          </h2>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400 max-w-lg mx-auto mt-2.5 leading-relaxed">
+            This audit record has not yet been committed to an on-chain settlement Merkle Tree batch on the Soroban contract (or represents an external audit export).
+          </p>
+          <div className="mt-6 flex justify-center gap-3">
+            <Button
+              onClick={() => {
+                setUnmatchedError({ isUnmatched: false });
+                setSelectedBatchIndex(0);
+              }}
+              className="rounded-xl bg-zinc-900 dark:bg-indigo-600 text-white font-semibold text-xs h-10 px-5 shadow-sm"
+            >
+              Browse Batch 0 ({SAMPLE_SETTLEMENT_BATCHES[0].campaignName})
+            </Button>
+          </div>
+        </Card>
+      ) : (
+        <>
 
       {/* 2. Transaction Search & Upload Bar */}
       <Card className="bg-white dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800 rounded-3xl shadow-sm overflow-hidden">
@@ -873,6 +946,10 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
                         }
                       }}
                       onMouseEnter={(e) => {
+                        if (hoverTimeoutRef.current) {
+                          clearTimeout(hoverTimeoutRef.current);
+                          hoverTimeoutRef.current = null;
+                        }
                         const rect = e.currentTarget.getBoundingClientRect();
                         setHoveredNode({
                           node,
@@ -880,7 +957,12 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
                           y: rect.top,
                         });
                       }}
-                      onMouseLeave={() => setHoveredNode(null)}
+                      onMouseLeave={() => {
+                        if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+                        hoverTimeoutRef.current = setTimeout(() => {
+                          setHoveredNode(null);
+                        }, 200);
+                      }}
                     >
                       <rect
                         width={nodeWidth}
@@ -1016,6 +1098,18 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, scale: 0.96 }}
               transition={{ duration: 0.15 }}
+              onMouseEnter={() => {
+                if (hoverTimeoutRef.current) {
+                  clearTimeout(hoverTimeoutRef.current);
+                  hoverTimeoutRef.current = null;
+                }
+              }}
+              onMouseLeave={() => {
+                if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+                hoverTimeoutRef.current = setTimeout(() => {
+                  setHoveredNode(null);
+                }, 150);
+              }}
               style={{
                 position: "fixed",
                 left: `${Math.min(window.innerWidth - 320, Math.max(20, hoveredNode.x - 150))}px`,
@@ -1377,35 +1471,45 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
           {/* Root Match Comparison Footer */}
           <div
             className={`mt-6 p-5 rounded-2xl border flex flex-col md:flex-row justify-between items-start md:items-center gap-4 ${
-              verificationResult && !verificationResult.isValid
-                ? "bg-red-50 dark:bg-red-950/30 border-red-300 dark:border-red-800 text-red-900 dark:text-red-200"
-                : "bg-emerald-50/80 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700 text-emerald-950 dark:text-emerald-100"
+              verificationResult === null
+                ? "bg-slate-50 dark:bg-zinc-800/40 border-slate-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300"
+                : !verificationResult.isValid
+                  ? "bg-red-50 dark:bg-red-950/30 border-red-300 dark:border-red-800 text-red-900 dark:text-red-200"
+                  : "bg-emerald-50/80 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700 text-emerald-950 dark:text-emerald-100"
             }`}
           >
             <div>
               <div className="flex items-center gap-2">
-                {verificationResult && !verificationResult.isValid ? (
+                {verificationResult === null ? (
+                  <Clock className="w-5 h-5 text-zinc-500 dark:text-zinc-400" />
+                ) : !verificationResult.isValid ? (
                   <XCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
                 ) : (
                   <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
                 )}
                 <span className="font-extrabold text-base">
-                  {verificationResult && !verificationResult.isValid
-                    ? "Inclusion Proof Fails: Computed Root Mismatches On-Chain State"
-                    : "Cryptographic Inclusion Proof Confirmed Against Soroban Root"}
+                  {verificationResult === null
+                    ? "Select a Leaf to Verify Inclusion Proof"
+                    : !verificationResult.isValid
+                      ? "Inclusion Proof Fails: Computed Root Mismatches On-Chain State"
+                      : "Cryptographic Inclusion Proof Confirmed Against Soroban Root"}
                 </span>
               </div>
               <p className="text-xs opacity-90 mt-1">
-                {verificationResult && !verificationResult.isValid
-                  ? "Audit Alert: Transaction data tampering detected! The reconstructed Merkle root differs from the immutable on-chain root published in ledger sequence #" +
-                    currentBatch.ledgerSequence
-                  : "All intermediary SHA-256 hashes resolve deterministically to the Soroban contract Merkle root. Conversion leaf is authentic and untampered."}
+                {verificationResult === null
+                  ? "Select a conversion transaction leaf in the tree above to calculate its cryptographic SHA-256 inclusion proof against the Soroban contract root."
+                  : !verificationResult.isValid
+                    ? "Audit Alert: Transaction data tampering detected! The reconstructed Merkle root differs from the immutable on-chain root published in ledger sequence #" +
+                      currentBatch.ledgerSequence
+                    : "All intermediary SHA-256 hashes resolve deterministically to the Soroban contract Merkle root. Conversion leaf is authentic and untampered."}
               </p>
             </div>
 
             <Button
               variant="outline"
+              disabled={!verificationResult}
               onClick={() => {
+                if (!verificationResult) return;
                 const proofPayload = {
                   batchId: currentBatch.batchId,
                   ledgerSequence: currentBatch.ledgerSequence,
@@ -1413,8 +1517,8 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
                   leafIndex: activeProof?.leafIndex,
                   leafHash: isTampered ? tamperedHash : activeProof?.leafHash,
                   orderMetadata: activeProof?.leafOrder,
-                  computedRoot: verificationResult?.computedRoot,
-                  isValid: verificationResult?.isValid,
+                  computedRoot: verificationResult.computedRoot,
+                  isValid: verificationResult.isValid,
                   siblings: activeProof?.steps.map((s) => ({
                     level: s.level,
                     position: s.siblingPosition,
@@ -1424,7 +1528,7 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
                 };
                 handleCopy(JSON.stringify(proofPayload, null, 2), "Audit Proof JSON");
               }}
-              className="rounded-xl border-emerald-300 dark:border-emerald-600 text-xs font-bold h-10 px-4 shrink-0 bg-white/60 dark:bg-zinc-900/60"
+              className="rounded-xl border-emerald-300 dark:border-emerald-600 text-xs font-bold h-10 px-4 shrink-0 bg-white/60 dark:bg-zinc-900/60 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {copiedHash?.startsWith("{") ? (
                 <Check className="w-3.5 h-3.5 text-emerald-500 mr-1.5" />
@@ -1436,6 +1540,8 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
           </div>
         </CardContent>
       </Card>
+        </>
+      )}
     </div>
   );
 };

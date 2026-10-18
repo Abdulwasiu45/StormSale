@@ -175,8 +175,8 @@ export async function hashOrderLeaf(order: OrderMetadata): Promise<string> {
     order.txHash.toLowerCase(),
     order.affiliateAddress,
     order.campaignId,
-    order.amountXlm.toFixed(2),
-    order.commissionXlm.toFixed(2),
+    BigInt(Math.round(order.amountXlm * 1e7)).toString(),
+    BigInt(Math.round(order.commissionXlm * 1e7)).toString(),
     order.timestamp,
     order.clearingStatus,
   ].join("|");
@@ -378,6 +378,9 @@ export async function verifyMerkleProofStepByStep(
 }> {
   // Respect explicit empty string without falling back to proof.leafHash
   const startingLeafHash = customLeafHash !== undefined ? customLeafHash : proof.leafHash;
+  const leafBindsOrder =
+    proof.leafOrder === undefined ||
+    (await hashOrderLeaf(proof.leafOrder)) === proof.leafHash;
   let runningHash = startingLeafHash;
   const verifiedSteps: MerkleProofStep[] = [];
 
@@ -407,7 +410,7 @@ export async function verifyMerkleProofStepByStep(
   }
 
   return {
-    isValid: runningHash === trustedRootHash,
+    isValid: leafBindsOrder && runningHash === trustedRootHash,
     computedRoot: runningHash,
     expectedRoot: trustedRootHash,
     verifiedSteps,
@@ -467,7 +470,7 @@ export const SAMPLE_SETTLEMENT_BATCHES: SettlementBatch[] = [
     campaignAddress: STELLAR_FIXTURE_KEYS.contracts.techGadgets,
     ledgerSequence: 48291042,
     settledAt: "2026-05-16 08:30 UTC",
-    contractRootHash: "31aeaa6932814326f5131289a10ba98acf26c8bdd8fb8f3ee9c8d9ed6c0e6f7f",
+    contractRootHash: "c08ad5fd64631602f635ab068e5c44f19ecf3996db01ac7305e28b422d0819b8",
     orders: [
       {
         orderId: "ORD-9401",
@@ -565,7 +568,7 @@ export const SAMPLE_SETTLEMENT_BATCHES: SettlementBatch[] = [
     campaignAddress: STELLAR_FIXTURE_KEYS.contracts.web3Masterclass,
     ledgerSequence: 48150918,
     settledAt: "2026-05-15 14:45 UTC",
-    contractRootHash: "ae3ef4a91c10957800a78397c7288bd5e0d6aa3ba7a0ac823549ad420aa03755",
+    contractRootHash: "f19f9e8d92b4eb019714420dc7aebc0bd9f6e7e566da4284e22cf0dd7871982a",
     orders: [
       {
         orderId: "ORD-8810",
@@ -619,7 +622,7 @@ export const SAMPLE_SETTLEMENT_BATCHES: SettlementBatch[] = [
     campaignAddress: STELLAR_FIXTURE_KEYS.contracts.summerSale,
     ledgerSequence: 47992301,
     settledAt: "2026-05-14 18:00 UTC",
-    contractRootHash: "1bd150847d89668fb925cef12cb431dbf0aa28637fac83a136f7856cfea43469",
+    contractRootHash: "770ea719c523dd3b1dec51be3b8fe99aeea5b815d63362b437a13527932f1be4",
     orders: [
       {
         orderId: "ORD-7101",
