@@ -11,6 +11,9 @@ import {
   createCampaignContractCall,
   logSaleContractCall,
   claimPayoutContractCall,
+  getTokenAllowanceQuery,
+  approveTokenContractCall,
+  refundCampaignEscrowContractCall,
 } from "../lib/stellar";
 import type { WalletType } from "../lib/stellar";
 import { STELLAR_CONFIG } from "../config/stellar";
@@ -18,6 +21,7 @@ import { registerUser } from "../utils/api";
 import { dispatchWebhookEvent } from "../lib/webhookEngine";
 import type { ClaimableCampaignItem, BatchClaimReceipt } from "../lib/batchClaim";
 import type { PasskeyCredentialRecord } from "../lib/passkeySigner";
+import { purgeOnLogout } from "../lib/storage";
 
 export interface Web3ContextType {
   userAddress: string | null;
@@ -56,10 +60,19 @@ export interface Web3ContextType {
   ) => Promise<{ success: boolean; txHash?: string }>;
 
   claimPayoutOnChain: (campaignId: number) => Promise<{ success: boolean; txHash?: string }>;
+  refundCampaignEscrow: (campaignId: number) => Promise<{ success: boolean; txHash?: string }>;
 
   batchClaimPayoutsOnChain: (campaigns: ClaimableCampaignItem[]) => Promise<BatchClaimReceipt>;
 
   registerPasskeyAccount: (userName?: string) => Promise<PasskeyCredentialRecord>;
+
+  // Token Allowance & Escrow Operations
+  tokenAllowance: number;
+  refreshTokenAllowance: (spender?: string) => Promise<number>;
+  approveTokenAllowance: (
+    amount: number,
+    spender?: string,
+  ) => Promise<{ success: boolean; txHash?: string }>;
 
   // Compatibility helpers for legacy form callers
   factoryContract: any;
@@ -77,6 +90,7 @@ export function Web3Provider({ children }: { children: ReactNode }) {
   const [isConnected, setIsConnected] = useState(false);
   const [network, setNetwork] = useState<string>(STELLAR_CONFIG.network);
   const [xlmBalance, setXlmBalance] = useState<string>("0.00");
+  const [tokenAllowance, setTokenAllowance] = useState<number>(0);
   const [connectorType, setConnectorType] = useState<WalletType | null>(null);
   const [ledgerBipPath, setLedgerBipPath] = useState<string>("44'/148'/0'");
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
@@ -93,6 +107,35 @@ export function Web3Provider({ children }: { children: ReactNode }) {
       console.warn("Could not fetch balance:", err);
     }
   }, []);
+
+  // Refresh token allowance on-chain
+  const refreshTokenAllowance = useCallback(async (spender?: string) => {
+    if (!userAddress) {
+      setTokenAllowance(0);
+      return 0;
+    }
+    try {
+      const allowance = await getTokenAllowanceQuery(userAddress, spender);
+      setTokenAllowance(allowance);
+      return allowance;
+    } catch (err) {
+      console.warn("Could not fetch token allowance:", err);
+      return 0;
+    }
+  }, [userAddress]);
+
+  // Approve token allowance on-chain
+  const approveTokenAllowance = useCallback(async (amount: number, spender?: string) => {
+    if (!userAddress) throw new Error("Wallet not connected");
+    const res = await approveTokenContractCall(
+      userAddress,
+      amount,
+      spender,
+      connectorType || "freighter",
+    );
+    setTokenAllowance(res.allowance);
+    return res;
+  }, [userAddress, connectorType]);
 
   // Sync with backend database & persistent role
   const syncUserWithBackend = useCallback(async (address: string) => {
@@ -167,6 +210,7 @@ export function Web3Provider({ children }: { children: ReactNode }) {
       if (type !== "mock") {
         await refreshBalance(address);
       }
+      await refreshTokenAllowance();
       await syncUserWithBackend(address);
       setIsWalletModalOpen(false);
     } catch (error) {
@@ -181,6 +225,8 @@ export function Web3Provider({ children }: { children: ReactNode }) {
     setIsConnected(false);
     setConnectorType(null);
     setXlmBalance("0.00");
+    setTokenAllowance(0);
+    void purgeOnLogout();
   };
 
   const updateUserRole = async (role: string) => {
@@ -241,12 +287,23 @@ export function Web3Provider({ children }: { children: ReactNode }) {
           status: "created",
         });
       }
-      setTimeout(() => refreshBalance(userAddress), 1000);
+      setTimeout(() => {
+        refreshBalance(userAddress);
+        refreshTokenAllowance();
+      }, 1000);
       return res;
     } else {
       // Mock fallback for UI preview without extension
       const mockTxHash = `tx_${Date.now().toString(16)}_${Math.random().toString(16).slice(2, 8)}`;
       const newCampaignId = Math.floor(Math.random() * 9000) + 1000;
+      setTokenAllowance((prev) => Math.max(0, prev - budgetXlm));
+      if (typeof window !== "undefined" && window.localStorage) {
+        const stored = window.localStorage.getItem(`mock_allowance_${userAddress}_${STELLAR_CONFIG.contractId}`);
+        if (stored) {
+          const updated = Math.max(0, parseFloat(stored) - budgetXlm);
+          window.localStorage.setItem(`mock_allowance_${userAddress}_${STELLAR_CONFIG.contractId}`, updated.toString());
+        }
+      }
       return {
         success: true,
         campaignId: newCampaignId,
@@ -306,6 +363,25 @@ export function Web3Provider({ children }: { children: ReactNode }) {
           status: "claimed",
         });
       }
+      setTimeout(() => refreshBalance(userAddress), 1000);
+      return res;
+    } else {
+      const mockTxHash = `tx_${Date.now().toString(16)}_${Math.random().toString(16).slice(2, 8)}`;
+      return {
+        success: true,
+        txHash: mockTxHash,
+      };
+    }
+  };
+
+  // Soroban: Refund Unused Campaign Escrow
+  const refundCampaignEscrow = async (campaignId: number) => {
+    if (!userAddress) throw new Error("Wallet not connected");
+
+    console.log(`[Soroban] Refunding unused escrow for Campaign #${campaignId} by ${userAddress}`);
+
+    if (connectorType === "freighter" || connectorType === "albedo" || connectorType === "xbull") {
+      const res = await refundCampaignEscrowContractCall(userAddress, campaignId, connectorType);
       setTimeout(() => refreshBalance(userAddress), 1000);
       return res;
     } else {
@@ -407,8 +483,12 @@ export function Web3Provider({ children }: { children: ReactNode }) {
         createCampaignOnChain,
         logSaleOnChain,
         claimPayoutOnChain,
+        refundCampaignEscrow,
         batchClaimPayoutsOnChain,
         registerPasskeyAccount,
+        tokenAllowance,
+        refreshTokenAllowance,
+        approveTokenAllowance,
         factoryContract,
         getCampaignContract,
         provider: null,
