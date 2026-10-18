@@ -35,3 +35,11 @@ npx playwright show-report
 ```
 
 The backend and Horizon are stubbed (`mockBackend` in `helpers.ts`), so the journeys need no API or network. Wallets that need an extension or hardware (Freighter, Ledger, passkey) are not driven; the 1-tap demo account and read-only mode cover the connect flow.
+
+## Visual proof
+
+Journey captured in a real browser: wallet modal, role selection with consent, auditor dashboard.
+
+![Wallet modal](__proof__/01-wallet-modal.png)
+![Role selection](__proof__/02-role-selection.png)
+![Auditor dashboard](__proof__/03-auditor-dashboard.png)
