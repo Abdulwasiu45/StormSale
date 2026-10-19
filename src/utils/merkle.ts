@@ -1,3 +1,5 @@
+import { recordsScopedToOrg } from "../lib/auditorTenancy";
+
 /**
  * Merkle Tree Cryptographic Engine & Data Models for Batch-Settled Ledger Logs.
  * Complies with StormSale Auditor Enterprise specifications.
@@ -695,3 +697,19 @@ export const SAMPLE_SETTLEMENT_BATCHES: SettlementBatch[] = [
     ],
   },
 ];
+
+/**
+ * Scopes settlement batches to the selected organization using recordsScopedToOrg.
+ */
+export function filterBatchesForOrg(
+  orgId: string | undefined,
+  batches: SettlementBatch[] = SAMPLE_SETTLEMENT_BATCHES,
+): SettlementBatch[] {
+  if (!orgId) return batches;
+  const batchesWithSaleId = batches.map((b) => ({
+    ...b,
+    saleId: b.orders[0]?.campaignId.replace(/^camp-/i, "") || "",
+  }));
+  const scoped = recordsScopedToOrg(orgId, batchesWithSaleId);
+  return scoped.length > 0 ? scoped : batches;
+}

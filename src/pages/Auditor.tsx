@@ -86,6 +86,7 @@ const TenantSelector = () => {
 };
 
 const AuditorContent: React.FC<AuditorProps> = ({ onBack }) => {
+  const { org } = useAuditorTenancy();
   const [activeTab, setActiveTab] = useState("overview");
   const [merkleTargetSaleId, setMerkleTargetSaleId] = useState<string | undefined>(undefined);
 
@@ -99,6 +100,11 @@ const AuditorContent: React.FC<AuditorProps> = ({ onBack }) => {
     { id: "soc2", label: "SOC 2 Evidence", icon: ShieldCheck },
   ];
 
+  const handleTabChange = (tab: string) => {
+    setMerkleTargetSaleId(undefined);
+    setActiveTab(tab);
+  };
+
   const handleViewMerkleProof = (saleId: string) => {
     setMerkleTargetSaleId(saleId);
     setActiveTab("merkle");
@@ -107,12 +113,17 @@ const AuditorContent: React.FC<AuditorProps> = ({ onBack }) => {
   const renderContent = () => {
     switch (activeTab) {
       case "merkle":
-        return <MerkleTreeVisualizer initialSaleId={merkleTargetSaleId} />;
+        return (
+          <MerkleTreeVisualizer
+            initialSaleId={merkleTargetSaleId}
+            organizationId={org.id}
+          />
+        );
       case "verify":
         return <VerifyAccess />;
       case "history":
         return (
-          <AuditHistory onTabChange={setActiveTab} onViewMerkleProof={handleViewMerkleProof} />
+          <AuditHistory onTabChange={handleTabChange} onViewMerkleProof={handleViewMerkleProof} />
         );
       case "compliance":
         return <ComplianceReport />;
@@ -121,7 +132,7 @@ const AuditorContent: React.FC<AuditorProps> = ({ onBack }) => {
       case "soc2":
         return <Soc2EvidenceExport />;
       default:
-        return <AuditorOverview onTabChange={setActiveTab} />;
+        return <AuditorOverview onTabChange={handleTabChange} />;
     }
   };
 
@@ -129,7 +140,7 @@ const AuditorContent: React.FC<AuditorProps> = ({ onBack }) => {
     <div className="flex flex-col lg:flex-row min-h-screen bg-slate-50 dark:bg-zinc-950 font-sans selection:bg-indigo-500/30">
       <Sidebar
         activeTab={activeTab}
-        onTabChange={setActiveTab}
+        onTabChange={handleTabChange}
         tabs={tabs}
         onBack={onBack}
         roleName="Auditor Enterprise"

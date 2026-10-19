@@ -10,7 +10,10 @@ import {
   findLeafByTxHash,
   parseTransactionHashFromReceipt,
   calculateCommissionPercentage,
+  filterBatchesForOrg,
 } from "../utils/merkle";
+import { Auditor } from "../pages/Auditor";
+import { Web3Provider } from "../context/Web3Context";
 
 describe("MerkleTreeVisualizer Component & Cryptographic Engine Suite", () => {
   beforeEach(() => {
@@ -190,4 +193,47 @@ describe("MerkleTreeVisualizer Component & Cryptographic Engine Suite", () => {
     expect(payload.computedRoot).toBe(batch.contractRootHash);
     expect(payload.siblings.length).toBe(2);
   });
+
+  it("filters batches by organization tenancy using filterBatchesForOrg", () => {
+    // Northwind has sales 1042 and 1100 -> Batch 0 & Batch 2
+    const northwindBatches = filterBatchesForOrg("northwind-assurance");
+    expect(northwindBatches.some((b) => b.campaignName === "Tech Gadgets Pro")).toBe(true);
+    expect(northwindBatches.some((b) => b.campaignName === "Summer Sale 2026")).toBe(true);
+    expect(northwindBatches.some((b) => b.campaignName === "Web3 Masterclass")).toBe(false);
+
+    // Helix has sale 988 -> Batch 1
+    const helixBatches = filterBatchesForOrg("helix-compliance");
+    expect(helixBatches.some((b) => b.campaignName === "Web3 Masterclass")).toBe(true);
+    expect(helixBatches.some((b) => b.campaignName === "Tech Gadgets Pro")).toBe(false);
+
+    // When no organizationId is passed, returns all batches
+    const allBatches = filterBatchesForOrg(undefined);
+    expect(allBatches.length).toBe(SAMPLE_SETTLEMENT_BATCHES.length);
+  });
+
+  it("renders MerkleTreeVisualizer scoped to organizationId", () => {
+    const html = renderToString(
+      <NotificationProvider>
+        <MerkleTreeVisualizer organizationId="helix-compliance" />
+      </NotificationProvider>,
+    );
+
+    // Only Helix's batch should be in the select options
+    expect(html).toContain("Web3 Masterclass");
+    expect(html).not.toContain("Tech Gadgets Pro (8 Conversions)");
+  });
+
+  it("renders Auditor root component including tenancy selector and merkle navigation", () => {
+    const html = renderToString(
+      <Web3Provider>
+        <Auditor onBack={() => {}} />
+      </Web3Provider>,
+    );
+    expect(html).toContain("Organization scope");
+    expect(html).toContain("Northwind");
+    expect(html).toContain("Helix");
+    expect(html).toContain("Meridian");
+    expect(html).toContain("Interactive Merkle Tree Proof Explorer");
+  });
 });
+

@@ -16,7 +16,7 @@ import {
   findLeafByTxHash,
   parseTransactionHashFromReceipt,
   calculateCommissionPercentage,
-  SAMPLE_SETTLEMENT_BATCHES,
+  filterBatchesForOrg,
   type MerkleTree,
   type MerkleNode,
   type MerkleProof,
@@ -56,14 +56,20 @@ export interface MerkleTreeVisualizerProps {
   initialSaleId?: string;
   initialTxHash?: string;
   initialBatchIndex?: number;
+  organizationId?: string;
 }
 
 export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
   initialSaleId,
   initialTxHash,
   initialBatchIndex,
+  organizationId,
 }) => {
   const { showNotification } = useNotification();
+
+  const batches = useMemo(() => {
+    return filterBatchesForOrg(organizationId);
+  }, [organizationId]);
 
   // Match initial batch and leaf from props with exact normalized comparison
   const initialMatch = useMemo<{
@@ -75,7 +81,7 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
     if (
       typeof initialBatchIndex === "number" &&
       initialBatchIndex >= 0 &&
-      initialBatchIndex < SAMPLE_SETTLEMENT_BATCHES.length
+      initialBatchIndex < batches.length
     ) {
       return { batchIndex: initialBatchIndex, leafIndex: 0, isUnmatched: false };
     }
@@ -83,8 +89,8 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
       const cleanSaleId = initialSaleId.trim().toLowerCase();
       const strippedOrderNum = cleanSaleId.replace(/^ord-/, "");
 
-      for (let bIdx = 0; bIdx < SAMPLE_SETTLEMENT_BATCHES.length; bIdx++) {
-        const batch = SAMPLE_SETTLEMENT_BATCHES[bIdx];
+      for (let bIdx = 0; bIdx < batches.length; bIdx++) {
+        const batch = batches[bIdx];
         // 1. Exact orderId match
         const orderIdx = batch.orders.findIndex(
           (o) =>
@@ -109,8 +115,8 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
     }
     if (initialTxHash) {
       const cleanTx = initialTxHash.trim().toLowerCase().replace(/^0x/, "");
-      for (let bIdx = 0; bIdx < SAMPLE_SETTLEMENT_BATCHES.length; bIdx++) {
-        const batch = SAMPLE_SETTLEMENT_BATCHES[bIdx];
+      for (let bIdx = 0; bIdx < batches.length; bIdx++) {
+        const batch = batches[bIdx];
         const orderIdx = batch.orders.findIndex(
           (o) => o.txHash.toLowerCase().replace(/^0x/, "") === cleanTx,
         );
@@ -121,7 +127,7 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
       return { batchIndex: -1, leafIndex: -1, isUnmatched: true, unmatchedIdentifier: initialTxHash };
     }
     return { batchIndex: 0, leafIndex: 0, isUnmatched: false };
-  }, [initialBatchIndex, initialSaleId, initialTxHash]);
+  }, [initialBatchIndex, initialSaleId, initialTxHash, batches]);
 
   const [unmatchedError, setUnmatchedError] = useState<{
     isUnmatched: boolean;
@@ -135,7 +141,14 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
   const [selectedBatchIndex, setSelectedBatchIndex] = useState<number>(
     initialMatch.isUnmatched ? 0 : initialMatch.batchIndex,
   );
-  const currentBatch = SAMPLE_SETTLEMENT_BATCHES[selectedBatchIndex];
+  const currentBatch = batches[selectedBatchIndex] || batches[0];
+
+  useEffect(() => {
+    setSelectedBatchIndex(0);
+    setUnmatchedError({ isUnmatched: false });
+    setSearchTxHash("");
+    setSearchStatus({ type: "idle", message: "" });
+  }, [organizationId]);
 
   // Tree state
   const [tree, setTree] = useState<MerkleTree | null>(null);
@@ -512,10 +525,12 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
                 onChange={(e) => {
                   setSelectedBatchIndex(Number(e.target.value));
                   setUnmatchedError({ isUnmatched: false });
+                  setSearchTxHash("");
+                  setSearchStatus({ type: "idle", message: "" });
                 }}
                 className="w-full bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white font-semibold text-sm rounded-xl px-3 py-2 border border-slate-200 dark:border-zinc-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-sm"
               >
-                {SAMPLE_SETTLEMENT_BATCHES.map((b, idx) => (
+                {batches.map((b, idx) => (
                   <option key={b.batchId} value={idx}>
                     {b.batchId} — {b.campaignName} ({b.orders.length} Conversions)
                   </option>
@@ -598,7 +613,7 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
               }}
               className="rounded-xl bg-zinc-900 dark:bg-indigo-600 text-white font-semibold text-xs h-10 px-5 shadow-sm"
             >
-              Browse Batch 0 ({SAMPLE_SETTLEMENT_BATCHES[0].campaignName})
+              Browse Batch 0 ({batches[0]?.campaignName || "Default Batch"})
             </Button>
           </div>
         </Card>
@@ -1085,11 +1100,8 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
         {/* Floating Tooltip Component (Displaying raw hex bytes and order metadata) */}
         <AnimatePresence>
           {hoveredNode && (
-            <motion.div
-              initial={{ opacity: 0, y: 5, scale: 0.96 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.96 }}
-              transition={{ duration: 0.15 }}
+            <div
+              key="merkle-tooltip"
               onMouseEnter={() => {
                 if (hoverTimeoutRef.current) {
                   clearTimeout(hoverTimeoutRef.current);
@@ -1109,8 +1121,14 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
                 transform: "translateY(-100%)",
                 zIndex: 60,
               }}
-              className="w-80 p-4 rounded-2xl bg-zinc-900/95 dark:bg-black/95 text-white shadow-2xl backdrop-blur-md border border-zinc-700/80 pointer-events-auto"
             >
+              <motion.div
+                initial={{ opacity: 0, y: 5, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.96 }}
+                transition={{ duration: 0.15 }}
+                className="w-80 p-4 rounded-2xl bg-zinc-900/95 dark:bg-black/95 text-white shadow-2xl backdrop-blur-md border border-zinc-700/80 pointer-events-auto"
+              >
               <div className="flex items-center justify-between border-b border-zinc-800 pb-2 mb-2.5">
                 <div className="flex items-center gap-1.5">
                   {hoveredNode.node.isLeaf ? (
@@ -1199,7 +1217,8 @@ export const MerkleTreeVisualizer: React.FC<MerkleTreeVisualizerProps> = ({
                   </div>
                 </div>
               )}
-            </motion.div>
+              </motion.div>
+            </div>
           )}
         </AnimatePresence>
       </Card>
