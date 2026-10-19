@@ -1,20 +1,51 @@
-
-import React, { useEffect, useState } from "react";
+import React, { Suspense, useState, useEffect, useRef, lazy } from "react";
 import { Web3Provider } from "./context/Web3Context";
+import { WalletConnectProvider } from "./context/WalletConnectContext";
 import {
   NotificationProvider,
   NotificationWrapper,
 } from "./context/NotificationContext";
-import { Landing } from "./pages/Landing";
-import { Dashboard } from "./pages/Dashboard";
-import { Advertiser } from "./pages/Advertiser";
-import { Affiliate } from "./pages/Affiliate";
-import { Auditor } from "./pages/Auditor";
 import { useWeb3 } from "./hooks/useWeb3";
 import { usePreference } from "./hooks/usePreference";
 import { ConnectWalletModal } from "./components/shared/ConnectWalletModal";
-import { BrandedCampaignView } from "./components/shared/BrandedCampaignView";
+import { initTelegramWebApp, syncTelegramTheme, isTelegramMiniApp } from "./lib/telegram";
 import { loadBrandConfig } from "./lib/branding";
+
+// Lazy-loaded routes and role-specific dashboards
+export const Landing = lazy(() => import("./pages/Landing").then((m) => ({ default: m.Landing })));
+export const Dashboard = lazy(() =>
+  import("./pages/Dashboard").then((m) => ({ default: m.Dashboard })),
+);
+export const Advertiser = lazy(() =>
+  import("./pages/Advertiser").then((m) => ({ default: m.Advertiser })),
+);
+export const Affiliate = lazy(() =>
+  import("./pages/Affiliate").then((m) => ({ default: m.Affiliate })),
+);
+export const Auditor = lazy(() => import("./pages/Auditor").then((m) => ({ default: m.Auditor })));
+export const BrandedCampaignView = lazy(() =>
+  import("./components/shared/BrandedCampaignView").then((m) => ({
+    default: m.BrandedCampaignView,
+  })),
+);
+
+export function PageLoader() {
+  return (
+    <div
+      role="status"
+      aria-label="Loading page"
+      className="min-h-screen flex flex-col items-center justify-center p-6 bg-background text-foreground"
+    >
+      <div className="relative flex items-center justify-center">
+        <div className="w-12 h-12 rounded-full border-4 border-indigo-500/20 border-t-indigo-500 animate-spin" />
+        <div className="absolute w-6 h-6 rounded-full bg-indigo-500/10 animate-pulse" />
+      </div>
+      <p className="mt-4 text-sm font-medium text-muted-foreground animate-pulse">
+        Loading view...
+      </p>
+    </div>
+  );
+}
 
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -38,12 +69,9 @@ class ErrorBoundary extends React.Component<
       return (
         <div className="min-h-screen flex items-center justify-center p-4">
           <div className="max-w-lg text-center">
-            <h2 className="text-2xl font-bold mb-2">
-              Something went wrong
-            </h2>
+            <h2 className="text-2xl font-bold mb-2">Something went wrong</h2>
             <p className="text-sm text-muted-foreground mb-4">
-              An unexpected error occurred. Please refresh the page or try
-              again later.
+              An unexpected error occurred. Please refresh the page or try again later.
             </p>
             <button
               onClick={() => window.location.reload()}
@@ -71,29 +99,30 @@ type Page = (typeof VALID_PAGES)[number];
 
 function Router() {
   const { isConnected } = useWeb3();
+  const [tmaMode, setTmaMode] = useState(() => isTelegramMiniApp());
 
   const [currentPage, setCurrentPage] = usePreference<Page>(
     "stormsale.app.currentPage",
-    "dashboard",
+    isTelegramMiniApp() ? "affiliate" : "dashboard",
     (value) => VALID_PAGES.includes(value as Page),
   );
 
-  const [activeBrandSubdomain, setActiveBrandSubdomain] = useState<
-    string | null
-  >(() => {
-    if (typeof window === "undefined") {
-      return null;
-    }
+  const prevConnectedRef = useRef(isConnected);
 
+  useEffect(() => {
+    // Only reset to "dashboard" after isConnected transitions from true to false,
+    // preserving saved page state on initial load / reload.
+    if (prevConnectedRef.current && !isConnected) {
+      setCurrentPage("dashboard");
+    }
+    prevConnectedRef.current = isConnected;
+  }, [isConnected, setCurrentPage]);
+
+  const [activeBrandSubdomain, setActiveBrandSubdomain] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
     const params = new URLSearchParams(window.location.search);
     return params.get("brand") || params.get("c") || null;
   });
-
-  useEffect(() => {
-    if (!isConnected) {
-      setCurrentPage("dashboard");
-    }
-  }, [isConnected, setCurrentPage]);
 
   const handleNavigate = (page: string) => {
     if (VALID_PAGES.includes(page as Page)) {
@@ -103,62 +132,72 @@ function Router() {
 
   if (activeBrandSubdomain) {
     return (
-      <BrandedCampaignView
-        brandConfig={loadBrandConfig(activeBrandSubdomain)}
-        onClose={() => {
-          setActiveBrandSubdomain(null);
-          window.history.pushState({}, "", window.location.pathname);
-        }}
-        isStandalone
-      />
+      <Suspense fallback={<PageLoader />}>
+        <BrandedCampaignView
+          brandConfig={loadBrandConfig(activeBrandSubdomain)}
+          onClose={() => {
+            setActiveBrandSubdomain(null);
+            window.history.pushState({}, "", window.location.pathname);
+          }}
+          isStandalone
+        />
+      </Suspense>
     );
   }
 
   return (
     <>
       <ConnectWalletModal />
-
-      {!isConnected ? (
-        <Landing />
-      ) : (
-        <div className="min-h-screen bg-background">
-          <main>
-            {currentPage === "dashboard" && (
-              <Dashboard onNavigate={handleNavigate} />
-            )}
-
-            {currentPage === "advertiser" && (
-              <Advertiser
-                onBack={() => handleNavigate("dashboard")}
-              />
-            )}
-
-            {currentPage === "affiliate" && (
-              <Affiliate
-                onBack={() => handleNavigate("dashboard")}
-              />
-            )}
-
-            {currentPage === "auditor" && (
-              <Auditor
-                onBack={() => handleNavigate("dashboard")}
-              />
-            )}
-          </main>
-        </div>
-      )}
+      <Suspense fallback={<PageLoader />}>
+        {!isConnected && !tmaMode ? (
+          <Landing />
+        ) : (
+          <div className="min-h-screen bg-background">
+            <main>
+              {currentPage === "dashboard" && <Dashboard onNavigate={handleNavigate} />}
+              {currentPage === "advertiser" && (
+                <Suspense fallback={<div className="p-8 text-center">Loading Advertiser...</div>}>
+                  <Advertiser onBack={() => handleNavigate("dashboard")} />
+                </Suspense>
+              )}
+              {currentPage === "affiliate" && (
+                <Suspense fallback={<div className="p-8 text-center">Loading Affiliate...</div>}>
+                  <Affiliate
+                    onBack={() => (isConnected ? handleNavigate("dashboard") : setTmaMode(false))}
+                  />
+                </Suspense>
+              )}
+              {currentPage === "auditor" && (
+                <Suspense fallback={<div className="p-8 text-center">Loading Auditor...</div>}>
+                  <Auditor onBack={() => handleNavigate("dashboard")} />
+                </Suspense>
+              )}
+            </main>
+          </div>
+        )}
+      </Suspense>
     </>
   );
 }
 
 function App() {
+  useEffect(() => {
+    initTelegramWebApp();
+    const cleanup = syncTelegramTheme();
+    return () => {
+      cleanup();
+    };
+  }, []);
+
   return (
     <NotificationWrapper>
       <ErrorBoundary>
         <Web3Provider>
-          <NotificationProvider>
-            <Router />
-          </NotificationProvider>
+          <WalletConnectProvider>
+            <NotificationProvider>
+              <Router />
+            </NotificationProvider>
+          </WalletConnectProvider>
         </Web3Provider>
       </ErrorBoundary>
     </NotificationWrapper>

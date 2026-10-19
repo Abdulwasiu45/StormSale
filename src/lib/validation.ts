@@ -1,9 +1,9 @@
 /**
- * Unified validation schemas for StormSale forms.
+ * Unified validation schemas for StormSale forms and API endpoints.
  *
- * All form inputs and Soroban contract arguments are validated here.
+ * All form inputs, Soroban contract arguments, and API payloads are validated here.
  * Zod schemas serve as the single source of truth — usable on both
- * the frontend (field-level feedback) and any backend/edge logic.
+ * the frontend (field-level feedback) and backend/API boundaries.
  */
 import { z } from "zod";
 
@@ -56,10 +56,10 @@ export const xlmAmountSchema = z
   .string()
   .trim()
   .min(1, "Amount is required")
-  .refine((val) => !isNaN(parseFloat(val)) && isFinite(Number(val)), {
+  .refine((val) => !isNaN(Number(val)) && isFinite(Number(val)), {
     message: "Must be a valid number",
   })
-  .refine((val) => parseFloat(val) > 0, { message: "Amount must be greater than 0" })
+  .refine((val) => Number(val) > 0, { message: "Amount must be greater than 0" })
   .refine((val) => /^\d+(\.\d{1,7})?$/.test(val), {
     message: "Maximum 7 decimal places (XLM precision)",
   });
@@ -92,16 +92,18 @@ export const createCampaignSchema = z.object({
     .string()
     .trim()
     .min(1, "Commission rate is required")
-    .refine((val) => !isNaN(parseFloat(val)), { message: "Must be a valid number" })
-    .refine((val) => parseFloat(val) >= 1, { message: "Commission rate must be at least 1%" })
-    .refine((val) => parseFloat(val) <= 50, { message: "Commission rate cannot exceed 50%" }),
+    .refine((val) => !isNaN(Number(val)) && isFinite(Number(val)), {
+      message: "Must be a valid number",
+    })
+    .refine((val) => Number(val) >= 1, { message: "Commission rate must be at least 1%" })
+    .refine((val) => Number(val) <= 50, { message: "Commission rate cannot exceed 50%" }),
 
   budget: z
     .string()
     .trim()
     .optional()
     .refine(
-      (val) => !val || (!isNaN(parseFloat(val)) && parseFloat(val) > 0),
+      (val) => !val || (!isNaN(Number(val)) && isFinite(Number(val)) && Number(val) > 0),
       { message: "Budget must be a positive number" },
     ),
 
@@ -126,7 +128,7 @@ export type CreateCampaignInput = z.infer<typeof createCampaignSchema>;
  * contract: log_sale(campaignId, affiliateAddress, amountXlm)
  */
 export const logSaleSchema = z.object({
-  campaignAddress: stellarAddressSchema,
+  campaignAddress: sorobanContractSchema.or(stellarAddressSchema),
 
   affiliateAddress: stellarPublicKeySchema,
 
@@ -147,7 +149,7 @@ export type LogSaleInput = z.infer<typeof logSaleSchema>;
  * contract: grant_audit_access(saleId, auditorAddress, wrappedKey)
  */
 export const grantAccessSchema = z.object({
-  campaignAddress: stellarAddressSchema,
+  campaignAddress: sorobanContractSchema.or(stellarAddressSchema),
 
   saleId: positiveIntSchema,
 
@@ -163,7 +165,7 @@ export type GrantAccessInput = z.infer<typeof grantAccessSchema>;
  * contract: join_campaign(campaignAddress)
  */
 export const joinCampaignSchema = z.object({
-  campaignAddress: stellarAddressSchema,
+  campaignAddress: sorobanContractSchema.or(stellarAddressSchema),
 });
 
 export type JoinCampaignInput = z.infer<typeof joinCampaignSchema>;
@@ -175,12 +177,66 @@ export type JoinCampaignInput = z.infer<typeof joinCampaignSchema>;
  * contract: check_audit_access(campaignAddress, saleId)
  */
 export const verifyAccessSchema = z.object({
-  campaignAddress: stellarAddressSchema,
+  campaignAddress: sorobanContractSchema.or(stellarAddressSchema),
 
   saleId: positiveIntSchema,
 });
 
 export type VerifyAccessInput = z.infer<typeof verifyAccessSchema>;
+
+// ---------------------------------------------------------------------------
+// API schemas
+// ---------------------------------------------------------------------------
+
+/** Schema for registerUser API request */
+export const registerUserRequestSchema = z.object({
+  walletAddress: z
+    .string()
+    .trim()
+    .refine(
+      (val) =>
+        (val.startsWith("G") || val.startsWith("C")) &&
+        val.length >= 20 &&
+        val.length <= 56 &&
+        /^[A-Z0-9]+$/.test(val),
+      { message: "Must be a valid Stellar public key or contract address" },
+    ),
+  role: z.string().trim().min(1, "Role is required"),
+});
+
+export type RegisterUserRequestInput = z.infer<typeof registerUserRequestSchema>;
+
+/** Schema for registerUser API response */
+export const registerUserResponseSchema = z
+  .object({
+    role: z.string().optional(),
+  })
+  .passthrough();
+
+/** Schema for fetchCampaign API response */
+export const campaignMetadataResponseSchema = z
+  .object({
+    id: z.union([z.string(), z.number()]).optional(),
+    name: z.string().optional(),
+  })
+  .passthrough();
+
+/** Schema for individual CustomerConversion in fetchConversions API response */
+export const customerConversionSchema = z.object({
+  id: z.string(),
+  customerRef: z.string(),
+  affiliateAddress: z.string(),
+  affiliateName: z.string(),
+  campaignId: z.string(),
+  campaignName: z.string(),
+  amount: z.number(),
+  timestamp: z.string(),
+});
+
+/** Schema for fetchConversions API response */
+export const conversionsListResponseSchema = z.array(
+  customerConversionSchema.passthrough(),
+);
 
 // ---------------------------------------------------------------------------
 // Utility helpers

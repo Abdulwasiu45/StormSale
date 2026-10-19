@@ -1,4 +1,3 @@
-
 import { useEffect } from "react";
 import { Moon, Sun } from "lucide-react";
 import { usePreference } from "../../hooks/usePreference";
@@ -6,9 +5,33 @@ import { usePreference } from "../../hooks/usePreference";
 export function resolveEffectiveTheme(): boolean {
   try {
     if (typeof localStorage !== "undefined") {
+      const versioned = localStorage.getItem("stormsale.theme.dark");
+      if (versioned) {
+        try {
+          const parsed = JSON.parse(versioned);
+          if (parsed && typeof parsed.value === "boolean") {
+            return parsed.value;
+          }
+        } catch {
+          // fallback
+        }
+      }
+
       const stored = localStorage.getItem("darkMode");
       if (stored !== null) {
         return stored === "true";
+      }
+
+      const raw = localStorage.getItem("stormsale_affiliate_settings");
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed.theme === "string") {
+            return parsed.theme === "dark";
+          }
+        } catch {
+          // fallback
+        }
       }
     }
   } catch {
@@ -26,17 +49,23 @@ export function applyTheme(newDarkMode: boolean) {
   try {
     if (typeof localStorage !== "undefined") {
       localStorage.setItem("darkMode", newDarkMode.toString());
+      localStorage.setItem(
+        "stormsale.theme.dark",
+        JSON.stringify({ v: 1, value: newDarkMode }),
+      );
 
       const raw = localStorage.getItem("stormsale_affiliate_settings");
-
       if (raw) {
-        const parsed = JSON.parse(raw);
-        parsed.theme = newDarkMode ? "dark" : "light";
-
-        localStorage.setItem(
-          "stormsale_affiliate_settings",
-          JSON.stringify(parsed)
-        );
+        try {
+          const parsed = JSON.parse(raw);
+          parsed.theme = newDarkMode ? "dark" : "light";
+          localStorage.setItem(
+            "stormsale_affiliate_settings",
+            JSON.stringify(parsed),
+          );
+        } catch {
+          // Degrade gracefully
+        }
       }
     }
   } catch {
@@ -55,32 +84,51 @@ export function applyTheme(newDarkMode: boolean) {
 export function ThemeToggle() {
   const [darkMode, setDarkMode] = usePreference<boolean>(
     "stormsale.theme.dark",
-    false
+    false,
+    (v) => typeof v === "boolean",
   );
 
   useEffect(() => {
-    const checkDark = () => {
+    // Prioritize versioned preference; migrate legacy darkMode only when versioned key is absent
+    try {
+      if (typeof localStorage !== "undefined") {
+        const hasVersioned = localStorage.getItem("stormsale.theme.dark") !== null;
+        const legacy = localStorage.getItem("darkMode");
+        if (!hasVersioned && legacy !== null) {
+          const isLegacyDark = legacy === "true";
+          setDarkMode(isLegacyDark);
+          if (typeof document !== "undefined") {
+            document.documentElement.classList.toggle("dark", isLegacyDark);
+          }
+          return;
+        }
+      }
+    } catch {
+      // Degrade gracefully
+    }
+
+    if (typeof document !== "undefined") {
+      document.documentElement.classList.toggle("dark", darkMode);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleStorage = () => {
       const isDark = resolveEffectiveTheme();
-
       setDarkMode(isDark);
-
       if (typeof document !== "undefined") {
         document.documentElement.classList.toggle("dark", isDark);
       }
     };
 
-    checkDark();
-
-    window.addEventListener("storage", checkDark);
-
+    window.addEventListener("storage", handleStorage);
     return () => {
-      window.removeEventListener("storage", checkDark);
+      window.removeEventListener("storage", handleStorage);
     };
   }, [setDarkMode]);
 
   const toggleDarkMode = () => {
     const newDarkMode = !darkMode;
-
     setDarkMode(newDarkMode);
     applyTheme(newDarkMode);
   };

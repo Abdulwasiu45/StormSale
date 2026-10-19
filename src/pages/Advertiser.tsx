@@ -7,6 +7,8 @@ import { CampaignAnalytics } from "../components/advertiser/CampaignAnalytics";
 import { MyCampaignsList } from "../components/advertiser/MyCampaignsList";
 import { WebhookManager } from "../components/advertiser/WebhookManager";
 import { BrandCustomizer } from "../components/advertiser/BrandCustomizer";
+import { AuditAccessPortal } from "../components/advertiser/AuditAccessPortal";
+import { CohortVisualizer } from "../components/advertiser/CohortVisualizer";
 import { NotificationProvider } from "../context/NotificationContext";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { usePreference } from "../hooks/usePreference";
@@ -21,6 +23,8 @@ import {
   Megaphone,
   Radio,
   Palette,
+  FileSearch,
+  Layers,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -32,8 +36,12 @@ const ADVERTISER_TABS = [
   "overview",
   "create-campaign",
   "my-campaigns",
+  "brand-customizer",
   "log-sale",
+  "cohort-analysis",
+  "webhooks",
   "grant-access",
+  "audit-logs",
   "analytics",
 ] as const;
 type AdvertiserTab = (typeof ADVERTISER_TABS)[number];
@@ -51,8 +59,10 @@ const AdvertiserContent: React.FC<AdvertiserProps> = ({ onBack }) => {
     { id: "my-campaigns", label: "My Campaigns", icon: Users },
     { id: "brand-customizer", label: "Storefront & Branding", icon: Palette },
     { id: "log-sale", label: "Log Encrypted Sale", icon: Shield },
+    { id: "cohort-analysis", label: "Cohort & LTV Analysis", icon: Layers },
     { id: "webhooks", label: "Postback Webhooks", icon: Radio },
     { id: "grant-access", label: "Grant Audit Access", icon: Eye },
+    { id: "audit-logs", label: "Audit Access Logs", icon: FileSearch },
     { id: "analytics", label: "Campaign Analytics", icon: BarChart3 },
   ];
 
@@ -64,10 +74,14 @@ const AdvertiserContent: React.FC<AdvertiserProps> = ({ onBack }) => {
         return <BrandCustomizer />;
       case "log-sale":
         return <LogSaleForm />;
+      case "cohort-analysis":
+        return <CohortVisualizer />;
       case "webhooks":
         return <WebhookManager />;
       case "grant-access":
         return <GrantAccessForm />;
+      case "audit-logs":
+        return <AuditAccessPortal />;
       case "analytics":
         return <CampaignAnalytics />;
       case "overview":

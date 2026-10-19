@@ -4,12 +4,23 @@ import { JoinCampaignButton } from "../components/affiliate/JoinCampaignButton";
 import { SalesList } from "../components/affiliate/SalesList";
 import { ClaimPayouts } from "../components/affiliate/ClaimPayouts";
 import { AffiliateOverview } from "../components/affiliate/AffiliateOverview";
-import { AffiliateSettings } from "../components/affiliate/AffiliateSettings";
-import { Users, TrendingUp, DollarSign, Shield, LayoutDashboard, Sliders } from "lucide-react";
+import { TelegramCampaignBrowser } from "../components/affiliate/TelegramCampaignBrowser";
+import {
+  Users,
+  TrendingUp,
+  DollarSign,
+  Shield,
+  LayoutDashboard,
+  Send,
+  Sliders,
+} from "lucide-react";
 import { NotificationProvider } from "../context/NotificationContext";
 import { usePreference } from "../hooks/usePreference";
 import { motion, AnimatePresence } from "framer-motion";
+import { isTelegramMiniApp } from "../lib/telegram";
+import { AffiliateSettings } from "../components/affiliate/AffiliateSettings";
 import { Button } from "../components/ui/button";
+
 
 interface AffiliateProps {
   onBack: () => void;
@@ -17,10 +28,11 @@ interface AffiliateProps {
 
 const AFFILIATE_TABS = [
   "overview",
+  "telegram-browser",
   "join-campaign",
   "my-sales",
   "claim-payouts",
-  "performance",
+  "settings",
   "security",
 ] as const;
 type AffiliateTab = (typeof AFFILIATE_TABS)[number];
@@ -28,12 +40,13 @@ type AffiliateTab = (typeof AFFILIATE_TABS)[number];
 const AffiliateContent: React.FC<AffiliateProps> = ({ onBack }) => {
   const [activeTab, setActiveTab] = usePreference<AffiliateTab>(
     "stormsale.affiliate.tab",
-    "overview",
+    isTelegramMiniApp() ? "telegram-browser" : "overview",
     (v) => AFFILIATE_TABS.includes(v as AffiliateTab),
   );
 
   const tabs = [
     { id: "overview", label: "Dashboard Overview", icon: LayoutDashboard },
+    { id: "telegram-browser", label: "Telegram Campaigns", icon: Send },
     { id: "join-campaign", label: "Join Campaign", icon: Users },
     { id: "my-sales", label: "My Sales & Commissions", icon: DollarSign },
     { id: "claim-payouts", label: "Claim Payouts", icon: TrendingUp },
@@ -43,6 +56,8 @@ const AffiliateContent: React.FC<AffiliateProps> = ({ onBack }) => {
 
   const renderContent = () => {
     switch (activeTab) {
+      case "telegram-browser":
+        return <TelegramCampaignBrowser />;
       case "join-campaign":
         return <JoinCampaignButton />;
       case "my-sales":
