@@ -3,9 +3,6 @@ import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import {
   Plus,
-  Play,
-  Pause,
-  Settings,
   Users,
   BarChart3,
   TrendingUp,
@@ -323,10 +320,6 @@ export const MyCampaignsList = () => {
 
   const totalRevenue = campaigns.reduce(
     (acc, c) => acc + parseInt(c.totalRevenue.replace(/\D/g, "")),
-    0,
-  );
-  const totalCommissions = campaigns.reduce(
-    (acc, c) => acc + parseInt(c.totalCommissions.replace(/\D/g, "")),
     0,
   );
 
