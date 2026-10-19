@@ -32,6 +32,12 @@ import {
   initiateMultiSigRefund,
 } from "../../lib/multiSigSafe";
 import { MultiSigRefundModal } from "./MultiSigRefundModal";
+import { ContractTTLBadge } from "./ContractTTLBadge";
+import {
+  calculateTTLHealth,
+  formatLedgerDuration,
+  extendContractInstanceTTL,
+} from "../../lib/contractTTL";
 
 export type CampaignStatus = "Active" | "Paused" | "Completed";
 
@@ -154,6 +160,7 @@ export const initialMockCampaigns: Campaign[] = [
     escrowInitial: 30000,
     escrowBalance: 18500, // Ended campaign with 18,500 XLM unused escrow (> $10k Threshold)
     isRefunded: false,
+    ttlRemainingLedgers: 420000,
   },
 ];
 
@@ -191,6 +198,63 @@ export const MyCampaignsList = () => {
   const isCampaignLowEscrow = (c: Campaign) => {
     if (c.status === "Completed" || c.escrowInitial <= 0) return false;
     return c.escrowBalance / c.escrowInitial < 0.1 && c.escrowBalance > 0;
+  };
+
+  const [extendingId, setExtendingId] = useState<string | null>(null);
+
+  const lowTTLCount = campaigns.filter(
+    (c) => c.status === "Active" && (c.ttlRemainingLedgers ?? 0) < 10000,
+  ).length;
+
+  const handleExtendCampaignTTL = async (campaignId: string, contractAddress: string) => {
+    try {
+      setExtendingId(campaignId);
+      showNotification({
+        type: "info",
+        title: "Submitting State Rent Extension",
+        message: `Extending contract ${contractAddress} by 500,000 ledgers...`,
+      });
+
+      const res = await extendContractInstanceTTL({
+        contractId: contractAddress,
+        callerAddress: userAddress || "GDX7...MOCK",
+        extendToLedgers: 500000,
+        walletType: (connectorType as any) || "freighter",
+      });
+
+      if (res.success) {
+        setCampaigns((prev) =>
+          prev.map((c) =>
+            c.id === campaignId
+              ? {
+                  ...c,
+                  ttlRemainingLedgers: (c.ttlRemainingLedgers ?? 0) + 500000,
+                }
+              : c,
+          ),
+        );
+
+        showNotification({
+          type: "success",
+          title: "State Rent Extended",
+          message: `Successfully extended ${contractAddress} by 500,000 ledgers.`,
+        });
+      } else {
+        showNotification({
+          type: "error",
+          title: "Extension Failed",
+          message: res.error || "Failed to extend contract state rent",
+        });
+      }
+    } catch (err: any) {
+      showNotification({
+        type: "error",
+        title: "Extension Error",
+        message: err.message || "An unexpected error occurred",
+      });
+    } finally {
+      setExtendingId(null);
+    }
   };
 
   const handleRefund = async (campaign: Campaign) => {
@@ -866,11 +930,11 @@ export const MyCampaignsList = () => {
         isOpen={isMultiSigModalOpen}
         onClose={() => setIsMultiSigModalOpen(false)}
         proposal={activeMultiSigProposal}
-        onProposalUpdated={(updated) => {
+        onProposalUpdated={(updated: MultiSigRefundProposal) => {
           setActiveMultiSigProposal(updated);
           setMultiSigVersion((v) => v + 1);
         }}
-        onRefundExecuted={(campaignId) => {
+        onRefundExecuted={(campaignId: string) => {
           setCampaigns((prev) =>
             prev.map((c) =>
               c.id === campaignId ? { ...c, escrowBalance: 0, isRefunded: true } : c,
