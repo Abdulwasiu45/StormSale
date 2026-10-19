@@ -304,10 +304,6 @@ export const MyCampaignsList = () => {
     (acc, c) => acc + parseInt(c.totalRevenue.replace(/\D/g, "")),
     0,
   );
-  const totalCommissions = campaigns.reduce(
-    (acc, c) => acc + parseInt(c.totalCommissions.replace(/\D/g, "")),
-    0,
-  );
 
   return (
     <div className="space-y-8">
