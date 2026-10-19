@@ -3,9 +3,6 @@ import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import {
   Plus,
-  Play,
-  Pause,
-  Settings,
   Users,
   BarChart3,
   TrendingUp,
@@ -271,7 +268,7 @@ export const MyCampaignsList = () => {
         showNotification({
           type: "error",
           title: "Extension Failed",
-          message: res.error || "Failed to extend contract state rent",
+          message: res.message || "Failed to extend contract state rent",
         });
       }
     } catch (err: any) {
@@ -337,7 +334,7 @@ export const MyCampaignsList = () => {
         showNotification({
           type: "error",
           title: "Refill Failed",
-          message: result.error || "Failed to submit on-chain deposit",
+          message: result.message || "Failed to submit on-chain deposit",
         });
       }
     } catch (err: any) {
@@ -1078,25 +1075,15 @@ export const MyCampaignsList = () => {
         <AutoRefillConfigModal
           isOpen={selectedCampaignForConfig !== null}
           onClose={() => setSelectedCampaignForConfig(null)}
-          campaign={{
-            id: selectedCampaignForConfig.id,
-            name: selectedCampaignForConfig.name,
-            currentBalanceXlm:
-              selectedCampaignForConfig.currentBalanceXlm ?? selectedCampaignForConfig.escrowBalance,
-            initialBudgetXlm:
-              selectedCampaignForConfig.initialBudgetXlm ?? selectedCampaignForConfig.escrowInitial,
-            refillThresholdPercent: selectedCampaignForConfig.refillThresholdPercent ?? 15,
-          }}
-          onConfigSaved={(thresholdPercent) => {
-            setCampaigns((prev) =>
-              prev.map((c) =>
-                c.id === selectedCampaignForConfig.id
-                  ? { ...c, refillThresholdPercent: thresholdPercent }
-                  : c,
-              ),
-            );
-          }}
-          onRefillSuccess={(newBalanceXlm) => {
+          campaignId={selectedCampaignForConfig.id}
+          campaignName={selectedCampaignForConfig.name}
+          currentBalanceXlm={
+            selectedCampaignForConfig.currentBalanceXlm ?? selectedCampaignForConfig.escrowBalance
+          }
+          initialBudgetXlm={
+            selectedCampaignForConfig.initialBudgetXlm ?? selectedCampaignForConfig.escrowInitial
+          }
+          onRefillComplete={(newBalanceXlm: number) => {
             setCampaigns((prev) =>
               prev.map((c) =>
                 c.id === selectedCampaignForConfig.id
