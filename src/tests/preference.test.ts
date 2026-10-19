@@ -1,12 +1,7 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import React from "react";
 import { renderToString } from "react-dom/server";
-import {
-  SCHEMA_VERSION,
-  readRaw,
-  writeRaw,
-  usePreference,
-} from "../hooks/usePreference";
+import { SCHEMA_VERSION, readRaw, writeRaw, usePreference } from "../hooks/usePreference";
 
 describe("Persistent UI & Filter State Cache (#73)", () => {
   let mockStorage: Record<string, string> = {};
@@ -27,8 +22,12 @@ describe("Persistent UI & Filter State Cache (#73)", () => {
       length: 0,
       key: () => null,
     };
-    (globalThis as any).window = { localStorage: storageImpl };
-    (globalThis as any).localStorage = storageImpl;
+    vi.stubGlobal("window", { localStorage: storageImpl });
+    vi.stubGlobal("localStorage", storageImpl);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   describe("Low-level Storage Format & Versioning", () => {

@@ -11,7 +11,7 @@ import {
 } from "../../components/ui/card";
 import { useWeb3 } from "../../hooks/useWeb3";
 import { useNotification } from "../../context/NotificationContext";
-import { createCampaignSchema, getFieldErrors } from "../../lib/validation";
+import { getCreateCampaignSchema, getFieldErrors } from "../../lib/validation";
 import { CONTRACT_ADDRESSES } from "../../config/contracts";
 import { formatStellarAddress } from "../../lib/stellar";
 import {
@@ -32,13 +32,7 @@ import { SUPPORTED_ESCROW_ASSETS } from "../../config/stellar";
 import type { SupportedEscrowAssetCode } from "../../config/stellar";
 
 export type FlowStep =
-  | "idle"
-  | "checking"
-  | "approving"
-  | "approved"
-  | "creating"
-  | "success"
-  | "error";
+  "idle" | "checking" | "approving" | "approved" | "creating" | "success" | "error";
 
 export const CreateCampaignForm = () => {
   const [selectedAsset, setSelectedAsset] = useState<SupportedEscrowAssetCode>("XLM");
@@ -77,14 +71,12 @@ export const CreateCampaignForm = () => {
   const fracDigits = budget.includes(".") ? (budget.split(".")[1]?.length ?? 0) : 0;
   const isValidBudget = Boolean(
     budget &&
-      !isNaN(parsedBudget) &&
-      isFinite(parsedBudget) &&
-      parsedBudget > 0 &&
-      fracDigits <= maxDecimals,
+    !isNaN(parsedBudget) &&
+    isFinite(parsedBudget) &&
+    parsedBudget > 0 &&
+    fracDigits <= maxDecimals,
   );
   const budgetNum = isValidBudget ? parsedBudget : 0;
-  const commissionRateNum = parseFloat(commissionRate) || 10;
-  const clearingPeriodNum = parseInt(clearingPeriod) || 604800;
   const currentAssetAllowance = assetAllowances[selectedAsset] ?? tokenAllowance;
   const isAllowanceSufficient = isConnected && isValidBudget && currentAssetAllowance >= budgetNum;
   const allowanceDeficit = Math.max(0, budgetNum - currentAssetAllowance);
@@ -172,10 +164,10 @@ export const CreateCampaignForm = () => {
     if (e) e.preventDefault();
     setErrors({});
 
-    const result = createCampaignSchema.safeParse({
+    const result = getCreateCampaignSchema(maxDecimals).safeParse({
       campaignName,
       commissionRate,
-      budget: budget || undefined,
+      budget,
       clearingPeriod,
     });
 
@@ -195,18 +187,6 @@ export const CreateCampaignForm = () => {
         type: "error",
         title: "Wallet Not Connected",
         message: "Please connect your Freighter wallet first",
-      });
-      return;
-    }
-
-    if (!isValidBudget) {
-      showNotification({
-        type: "error",
-        title: "Invalid Budget",
-        message:
-          fracDigits > maxDecimals
-            ? `Budget for ${selectedAsset} supports at most ${maxDecimals} decimal places.`
-            : "Please enter a valid positive budget amount.",
       });
       return;
     }
@@ -252,10 +232,10 @@ export const CreateCampaignForm = () => {
       });
 
       const campaignResult = await createCampaignOnChain(
-        campaignName,
+        result.data.campaignName,
         budgetNum,
-        commissionRateNum,
-        clearingPeriodNum,
+        Number(result.data.commissionRate),
+        parseInt(result.data.clearingPeriod, 10),
         selectedAsset,
       );
 
@@ -308,7 +288,8 @@ export const CreateCampaignForm = () => {
                 Campaign #{lastCreatedCampaign.campaignId} Successfully Initialized
               </h5>
               <p className="text-xs text-emerald-800 dark:text-emerald-300 mt-0.5">
-                On-chain escrow is funded and ready to record affiliate conversions in {selectedAsset}.
+                On-chain escrow is funded and ready to record affiliate conversions in{" "}
+                {selectedAsset}.
               </p>
               {lastCreatedCampaign.txHash && (
                 <span className="font-mono text-[11px] text-emerald-700 dark:text-emerald-400 block mt-1">
@@ -387,7 +368,8 @@ export const CreateCampaignForm = () => {
                         USDC — USD Coin (Circle SAC) · Balance: {assetBalances?.USDC ?? "0.00"} USDC
                       </option>
                       <option value="EURC">
-                        EURC — Euro Coin (Circle SAC) · Balance: {assetBalances?.EURC ?? "0.00"} EURC
+                        EURC — Euro Coin (Circle SAC) · Balance: {assetBalances?.EURC ?? "0.00"}{" "}
+                        EURC
                       </option>
                     </select>
                     <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-400">
@@ -409,14 +391,21 @@ export const CreateCampaignForm = () => {
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-indigo-100/60 dark:border-indigo-900/30 text-zinc-600 dark:text-zinc-400">
                       <div>
-                        <span className="font-semibold text-zinc-500 dark:text-zinc-400">SAC Contract: </span>
-                        <span className="font-mono text-[11px] text-zinc-800 dark:text-zinc-200" title={SUPPORTED_ESCROW_ASSETS[selectedAsset].contractAddress}>
+                        <span className="font-semibold text-zinc-500 dark:text-zinc-400">
+                          SAC Contract:{" "}
+                        </span>
+                        <span
+                          className="font-mono text-[11px] text-zinc-800 dark:text-zinc-200"
+                          title={SUPPORTED_ESCROW_ASSETS[selectedAsset].contractAddress}
+                        >
                           {SUPPORTED_ESCROW_ASSETS[selectedAsset].contractAddress.slice(0, 8)}...
                           {SUPPORTED_ESCROW_ASSETS[selectedAsset].contractAddress.slice(-6)}
                         </span>
                       </div>
                       <div>
-                        <span className="font-semibold text-zinc-500 dark:text-zinc-400">Wallet Balance: </span>
+                        <span className="font-semibold text-zinc-500 dark:text-zinc-400">
+                          Wallet Balance:{" "}
+                        </span>
                         <span className="font-bold text-zinc-900 dark:text-white">
                           {assetBalances?.[selectedAsset] ?? "0.00"} {selectedAsset}
                         </span>
@@ -426,7 +415,8 @@ export const CreateCampaignForm = () => {
                     {selectedAsset !== "XLM" && (
                       <p className="text-[11px] text-indigo-700 dark:text-indigo-300 font-medium flex items-center gap-1.5 pt-0.5">
                         <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
-                        SAC Allowance Workflow: Auto-authorizes token approval on Circle SAC before escrow deployment.
+                        SAC Allowance Workflow: Auto-authorizes token approval on Circle SAC before
+                        escrow deployment.
                       </p>
                     )}
                   </div>
@@ -489,12 +479,14 @@ export const CreateCampaignForm = () => {
                         {selectedAsset}
                       </div>
                     </div>
-                    {budget && parseFloat(budget) > parseFloat(assetBalances?.[selectedAsset] || "0") && (
-                      <p className="text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-1">
-                        <AlertCircle className="w-3 h-3" />
-                        Warning: Budget exceeds current {selectedAsset} balance ({assetBalances?.[selectedAsset] ?? "0.00"}).
-                      </p>
-                    )}
+                    {budget &&
+                      parseFloat(budget) > parseFloat(assetBalances?.[selectedAsset] || "0") && (
+                        <p className="text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                          <AlertCircle className="w-3 h-3" />
+                          Warning: Budget exceeds current {selectedAsset} balance (
+                          {assetBalances?.[selectedAsset] ?? "0.00"}).
+                        </p>
+                      )}
                   </div>
                 </InputField>
               </div>
@@ -585,7 +577,10 @@ export const CreateCampaignForm = () => {
                       </span>
                     </div>
                     <div className="text-xl font-bold text-zinc-900 dark:text-white font-mono">
-                      {currentAssetAllowance.toLocaleString()} <span className="text-xs font-sans text-zinc-400 font-normal">{selectedAsset}</span>
+                      {currentAssetAllowance.toLocaleString()}{" "}
+                      <span className="text-xs font-sans text-zinc-400 font-normal">
+                        {selectedAsset}
+                      </span>
                     </div>
                   </div>
 
@@ -594,7 +589,10 @@ export const CreateCampaignForm = () => {
                       Required Deposit
                     </div>
                     <div className="text-xl font-bold text-zinc-900 dark:text-white font-mono">
-                      {budgetNum.toLocaleString()} <span className="text-xs font-sans text-zinc-400 font-normal">{selectedAsset}</span>
+                      {budgetNum.toLocaleString()}{" "}
+                      <span className="text-xs font-sans text-zinc-400 font-normal">
+                        {selectedAsset}
+                      </span>
                     </div>
                   </div>
 
@@ -615,7 +613,9 @@ export const CreateCampaignForm = () => {
                       ) : (
                         <div className="flex items-center space-x-1.5 text-amber-600 dark:text-amber-400 font-semibold text-xs">
                           <AlertCircle className="w-4 h-4" />
-                          <span>Approval Needed (-{allowanceDeficit.toLocaleString()} {selectedAsset})</span>
+                          <span>
+                            Approval Needed (-{allowanceDeficit.toLocaleString()} {selectedAsset})
+                          </span>
                         </div>
                       )}
                     </div>
@@ -633,9 +633,11 @@ export const CreateCampaignForm = () => {
                       className={`p-3.5 rounded-xl border transition-all flex items-center justify-between ${
                         flowStep === "approving"
                           ? "border-indigo-500 bg-indigo-50/50 dark:bg-indigo-950/30 ring-2 ring-indigo-500/20"
-                          : isAllowanceSufficient || flowStep === "approved" || flowStep === "success"
-                          ? "border-emerald-300 dark:border-emerald-800 bg-emerald-50/30 dark:bg-emerald-950/20 text-emerald-900 dark:text-emerald-300"
-                          : "border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-950/50"
+                          : isAllowanceSufficient ||
+                              flowStep === "approved" ||
+                              flowStep === "success"
+                            ? "border-emerald-300 dark:border-emerald-800 bg-emerald-50/30 dark:bg-emerald-950/20 text-emerald-900 dark:text-emerald-300"
+                            : "border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-950/50"
                       }`}
                     >
                       <div className="flex items-center space-x-3">
@@ -643,12 +645,16 @@ export const CreateCampaignForm = () => {
                           className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs ${
                             flowStep === "approving"
                               ? "bg-indigo-600 text-white animate-pulse"
-                              : isAllowanceSufficient || flowStep === "approved" || flowStep === "success"
-                              ? "bg-emerald-500 text-white"
-                              : "bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400"
+                              : isAllowanceSufficient ||
+                                  flowStep === "approved" ||
+                                  flowStep === "success"
+                                ? "bg-emerald-500 text-white"
+                                : "bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400"
                           }`}
                         >
-                          {isAllowanceSufficient || flowStep === "approved" || flowStep === "success" ? (
+                          {isAllowanceSufficient ||
+                          flowStep === "approved" ||
+                          flowStep === "success" ? (
                             <CheckCircle2 className="w-4 h-4" />
                           ) : (
                             "1"
@@ -661,9 +667,11 @@ export const CreateCampaignForm = () => {
                           <div className="text-xs text-zinc-500 dark:text-zinc-400">
                             {flowStep === "approving"
                               ? "Signing approval..."
-                              : isAllowanceSufficient || flowStep === "approved" || flowStep === "success"
-                              ? "Allowance Granted"
-                              : `Authorize ${budgetNum ? budgetNum + " " + selectedAsset : "Escrow"}`}
+                              : isAllowanceSufficient ||
+                                  flowStep === "approved" ||
+                                  flowStep === "success"
+                                ? "Allowance Granted"
+                                : `Authorize ${budgetNum ? budgetNum + " " + selectedAsset : "Escrow"}`}
                           </div>
                         </div>
                       </div>
@@ -678,8 +686,8 @@ export const CreateCampaignForm = () => {
                         flowStep === "creating"
                           ? "border-indigo-500 bg-indigo-50/50 dark:bg-indigo-950/30 ring-2 ring-indigo-500/20"
                           : flowStep === "success"
-                          ? "border-emerald-300 dark:border-emerald-800 bg-emerald-50/30 dark:bg-emerald-950/20 text-emerald-900 dark:text-emerald-300"
-                          : "border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-950/50"
+                            ? "border-emerald-300 dark:border-emerald-800 bg-emerald-50/30 dark:bg-emerald-950/20 text-emerald-900 dark:text-emerald-300"
+                            : "border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-950/50"
                       }`}
                     >
                       <div className="flex items-center space-x-3">
@@ -688,15 +696,11 @@ export const CreateCampaignForm = () => {
                             flowStep === "creating"
                               ? "bg-indigo-600 text-white animate-pulse"
                               : flowStep === "success"
-                              ? "bg-emerald-500 text-white"
-                              : "bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400"
+                                ? "bg-emerald-500 text-white"
+                                : "bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400"
                           }`}
                         >
-                          {flowStep === "success" ? (
-                            <CheckCircle2 className="w-4 h-4" />
-                          ) : (
-                            "2"
-                          )}
+                          {flowStep === "success" ? <CheckCircle2 className="w-4 h-4" /> : "2"}
                         </div>
                         <div>
                           <div className="font-bold text-sm text-zinc-900 dark:text-white">
@@ -706,8 +710,8 @@ export const CreateCampaignForm = () => {
                             {flowStep === "creating"
                               ? "Deploying contract..."
                               : flowStep === "success"
-                              ? "Escrow Live"
-                              : "Lock budget on Stellar"}
+                                ? "Escrow Live"
+                                : "Lock budget on Stellar"}
                           </div>
                         </div>
                       </div>
@@ -784,7 +788,9 @@ export const CreateCampaignForm = () => {
                     </Button>
 
                     <div className="flex items-center justify-center gap-2 pt-1">
-                      <span className="text-xs text-zinc-400 font-medium">Or perform steps manually:</span>
+                      <span className="text-xs text-zinc-400 font-medium">
+                        Or perform steps manually:
+                      </span>
                       <Button
                         type="button"
                         variant="outline"

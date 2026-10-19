@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { registerUser, fetchCampaign, fetchConversions } from "../utils/api";
 
 describe("API Boundary Validation Suite (#74)", () => {
-  const validPublicKey = "GASTORMSALE7TESTNET7AFFILIATE7MERCHANT7ESCROW7XLM7777777";
+  const validPublicKey = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
   const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
@@ -30,6 +30,9 @@ describe("API Boundary Validation Suite (#74)", () => {
       globalThis.fetch = vi.fn();
 
       await expect(registerUser("SHORT_INVALID", "AFFILIATE")).rejects.toThrow();
+      await expect(
+        registerUser("CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC", "AFFILIATE"),
+      ).rejects.toThrow();
       expect(globalThis.fetch).not.toHaveBeenCalled();
     });
 

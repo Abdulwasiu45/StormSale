@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { Moon, Sun } from "lucide-react";
-import { usePreference } from "../../hooks/usePreference";
+import { usePreference, SCHEMA_VERSION } from "../../hooks/usePreference";
 
 export function resolveEffectiveTheme(): boolean {
   try {
@@ -9,7 +9,7 @@ export function resolveEffectiveTheme(): boolean {
       if (versioned) {
         try {
           const parsed = JSON.parse(versioned);
-          if (parsed && typeof parsed.value === "boolean") {
+          if (parsed && parsed.v === SCHEMA_VERSION && typeof parsed.value === "boolean") {
             return parsed.value;
           }
         } catch {
@@ -51,7 +51,7 @@ export function applyTheme(newDarkMode: boolean) {
       localStorage.setItem("darkMode", newDarkMode.toString());
       localStorage.setItem(
         "stormsale.theme.dark",
-        JSON.stringify({ v: 1, value: newDarkMode }),
+        JSON.stringify({ v: SCHEMA_VERSION, value: newDarkMode }),
       );
 
       const raw = localStorage.getItem("stormsale_affiliate_settings");
@@ -59,10 +59,7 @@ export function applyTheme(newDarkMode: boolean) {
         try {
           const parsed = JSON.parse(raw);
           parsed.theme = newDarkMode ? "dark" : "light";
-          localStorage.setItem(
-            "stormsale_affiliate_settings",
-            JSON.stringify(parsed),
-          );
+          localStorage.setItem("stormsale_affiliate_settings", JSON.stringify(parsed));
         } catch {
           // Degrade gracefully
         }
@@ -92,9 +89,20 @@ export function ThemeToggle() {
     // Prioritize versioned preference; migrate legacy darkMode only when versioned key is absent
     try {
       if (typeof localStorage !== "undefined") {
-        const hasVersioned = localStorage.getItem("stormsale.theme.dark") !== null;
+        const versionedRaw = localStorage.getItem("stormsale.theme.dark");
+        let hasValidVersioned = false;
+        if (versionedRaw) {
+          try {
+            const parsed = JSON.parse(versionedRaw);
+            if (parsed && parsed.v === SCHEMA_VERSION && typeof parsed.value === "boolean") {
+              hasValidVersioned = true;
+            }
+          } catch {
+            // ignore
+          }
+        }
         const legacy = localStorage.getItem("darkMode");
-        if (!hasVersioned && legacy !== null) {
+        if (!hasValidVersioned && legacy !== null) {
           const isLegacyDark = legacy === "true";
           setDarkMode(isLegacyDark);
           if (typeof document !== "undefined") {

@@ -6,6 +6,7 @@
  * the frontend (field-level feedback) and backend/API boundaries.
  */
 import { z } from "zod";
+import { StrKey } from "@stellar/stellar-sdk";
 
 // ---------------------------------------------------------------------------
 // Shared primitives
@@ -13,21 +14,15 @@ import { z } from "zod";
 
 /**
  * A valid Stellar public key (G…) or Soroban contract ID (C…).
- * 56 uppercase alphanumeric characters, starting with G or C.
+ * 56 uppercase alphanumeric characters with valid StrKey checksum.
  */
 export const stellarAddressSchema = z
   .string()
   .trim()
-  .refine(
-    (val) =>
-      (val.startsWith("G") || val.startsWith("C")) &&
-      val.length === 56 &&
-      /^[A-Z0-9]+$/.test(val),
-    {
-      message:
-        "Must be a valid 56-character Stellar address starting with G (public key) or C (contract)",
-    },
-  );
+  .refine((val) => StrKey.isValidEd25519PublicKey(val) || StrKey.isValidContract(val), {
+    message:
+      "Must be a valid 56-character Stellar address starting with G (public key) or C (contract)",
+  });
 
 /**
  * Stellar public key only (G…). Used for affiliate/auditor wallet addresses.
@@ -35,10 +30,9 @@ export const stellarAddressSchema = z
 export const stellarPublicKeySchema = z
   .string()
   .trim()
-  .refine(
-    (val) => val.startsWith("G") && val.length === 56 && /^[A-Z0-9]+$/.test(val),
-    { message: "Must be a valid Stellar public key starting with G (56 characters)" },
-  );
+  .refine((val) => StrKey.isValidEd25519PublicKey(val), {
+    message: "Must be a valid Stellar public key starting with G (56 characters)",
+  });
 
 /**
  * Soroban contract address only (C…). Used for campaign contract addresses.
@@ -46,10 +40,9 @@ export const stellarPublicKeySchema = z
 export const sorobanContractSchema = z
   .string()
   .trim()
-  .refine(
-    (val) => val.startsWith("C") && val.length === 56 && /^[A-Z0-9]+$/.test(val),
-    { message: "Must be a valid Soroban contract address starting with C (56 characters)" },
-  );
+  .refine((val) => StrKey.isValidContract(val), {
+    message: "Must be a valid Soroban contract address starting with C (56 characters)",
+  });
 
 /** Positive XLM amount with up to 7 decimal places (Stellar's native precision). */
 export const xlmAmountSchema = z
@@ -78,46 +71,58 @@ export const positiveIntSchema = z
 // ---------------------------------------------------------------------------
 
 /**
- * CreateCampaignForm
+ * CreateCampaignForm generator with asset decimal precision enforcement.
  * contract: create_campaign(name, budgetXlm, commissionRatePercent, clearingPeriodSecs)
  */
-export const createCampaignSchema = z.object({
-  campaignName: z
-    .string()
-    .trim()
-    .min(3, "Campaign name must be at least 3 characters")
-    .max(64, "Campaign name must be 64 characters or fewer"),
+export const getCreateCampaignSchema = (maxDecimals: number = 7) =>
+  z.object({
+    campaignName: z
+      .string()
+      .trim()
+      .min(3, "Campaign name must be at least 3 characters")
+      .max(64, "Campaign name must be 64 characters or fewer"),
 
-  commissionRate: z
-    .string()
-    .trim()
-    .min(1, "Commission rate is required")
-    .refine((val) => !isNaN(Number(val)) && isFinite(Number(val)), {
-      message: "Must be a valid number",
-    })
-    .refine((val) => Number(val) >= 1, { message: "Commission rate must be at least 1%" })
-    .refine((val) => Number(val) <= 50, { message: "Commission rate cannot exceed 50%" }),
+    commissionRate: z
+      .string()
+      .trim()
+      .min(1, "Commission rate is required")
+      .refine((val) => !isNaN(Number(val)) && isFinite(Number(val)), {
+        message: "Must be a valid number",
+      })
+      .refine((val) => Number(val) >= 1, { message: "Commission rate must be at least 1%" })
+      .refine((val) => Number(val) <= 50, { message: "Commission rate cannot exceed 50%" }),
 
-  budget: z
-    .string()
-    .trim()
-    .optional()
-    .refine(
-      (val) => !val || (!isNaN(Number(val)) && isFinite(Number(val)) && Number(val) > 0),
-      { message: "Budget must be a positive number" },
-    ),
+    budget: z
+      .string()
+      .trim()
+      .min(1, "Budget is required")
+      .refine((val) => !isNaN(Number(val)) && isFinite(Number(val)), {
+        message: "Must be a valid number",
+      })
+      .refine((val) => Number(val) > 0, { message: "Budget must be a positive number" })
+      .refine(
+        (val) => {
+          const fracDigits = val.includes(".") ? (val.split(".")[1]?.length ?? 0) : 0;
+          return fracDigits <= maxDecimals;
+        },
+        {
+          message: `Budget supports at most ${maxDecimals} decimal places`,
+        },
+      ),
 
-  clearingPeriod: z
-    .string()
-    .trim()
-    .min(1, "Clearing period is required")
-    .refine((val) => /^\d+$/.test(val) && parseInt(val, 10) > 0, {
-      message: "Must be a positive number of seconds",
-    })
-    .refine((val) => parseInt(val, 10) >= 3600, {
-      message: "Clearing period must be at least 1 hour (3600 seconds)",
-    }),
-});
+    clearingPeriod: z
+      .string()
+      .trim()
+      .min(1, "Clearing period is required")
+      .refine((val) => /^\d+$/.test(val) && parseInt(val, 10) > 0, {
+        message: "Must be a positive number of seconds",
+      })
+      .refine((val) => parseInt(val, 10) >= 3600, {
+        message: "Clearing period must be at least 1 hour (3600 seconds)",
+      }),
+  });
+
+export const createCampaignSchema = getCreateCampaignSchema(7);
 
 export type CreateCampaignInput = z.infer<typeof createCampaignSchema>;
 
@@ -134,10 +139,7 @@ export const logSaleSchema = z.object({
 
   saleAmount: xlmAmountSchema,
 
-  customerData: z
-    .string()
-    .max(256, "Customer info must be 256 characters or fewer")
-    .optional(),
+  customerData: z.string().max(256, "Customer info must be 256 characters or fewer").optional(),
 });
 
 export type LogSaleInput = z.infer<typeof logSaleSchema>;
@@ -190,17 +192,7 @@ export type VerifyAccessInput = z.infer<typeof verifyAccessSchema>;
 
 /** Schema for registerUser API request */
 export const registerUserRequestSchema = z.object({
-  walletAddress: z
-    .string()
-    .trim()
-    .refine(
-      (val) =>
-        (val.startsWith("G") || val.startsWith("C")) &&
-        val.length >= 20 &&
-        val.length <= 56 &&
-        /^[A-Z0-9]+$/.test(val),
-      { message: "Must be a valid Stellar public key or contract address" },
-    ),
+  walletAddress: stellarPublicKeySchema,
   role: z.string().trim().min(1, "Role is required"),
 });
 
@@ -234,9 +226,7 @@ export const customerConversionSchema = z.object({
 });
 
 /** Schema for fetchConversions API response */
-export const conversionsListResponseSchema = z.array(
-  customerConversionSchema.passthrough(),
-);
+export const conversionsListResponseSchema = z.array(customerConversionSchema.passthrough());
 
 // ---------------------------------------------------------------------------
 // Utility helpers

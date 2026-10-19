@@ -6,6 +6,7 @@ import {
   xlmAmountSchema,
   positiveIntSchema,
   createCampaignSchema,
+  getCreateCampaignSchema,
   logSaleSchema,
   grantAccessSchema,
   joinCampaignSchema,
@@ -17,8 +18,8 @@ import {
 } from "../lib/validation";
 
 describe("Validation Schemas & Error Mapping Suite (#74)", () => {
-  const validPublicKey = "GASTORMSALE7TESTNET7AFFILIATE7MERCHANT7ESCROW7XLM7777777"; // 56 chars
-  const validContractId = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"; // 56 chars
+  const validPublicKey = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"; // 56 chars, valid Ed25519 public key
+  const validContractId = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC"; // 56 chars, valid contract ID
 
   describe("Stellar & Soroban Address Primitives", () => {
     it("validates valid 56-char public keys and contract IDs", () => {
@@ -28,7 +29,12 @@ describe("Validation Schemas & Error Mapping Suite (#74)", () => {
       expect(sorobanContractSchema.safeParse(validContractId).success).toBe(true);
     });
 
-    it("rejects invalid keys and wrong prefixes", () => {
+    it("rejects invalid keys, checksum failures, and wrong prefixes", () => {
+      // 56 chars starting with G, but invalid CRC checksum
+      expect(
+        stellarPublicKeySchema.safeParse("GASTORMSALE7TESTNET7AFFILIATE7MERCHANT7ESCROW7XLM7777777")
+          .success,
+      ).toBe(false);
       expect(stellarPublicKeySchema.safeParse(validContractId).success).toBe(false);
       expect(sorobanContractSchema.safeParse(validPublicKey).success).toBe(false);
       expect(stellarAddressSchema.safeParse("SHORT_KEY").success).toBe(false);
@@ -56,8 +62,8 @@ describe("Validation Schemas & Error Mapping Suite (#74)", () => {
     });
   });
 
-  describe("createCampaignSchema", () => {
-    it("accepts valid campaign payload", () => {
+  describe("createCampaignSchema and getCreateCampaignSchema", () => {
+    it("accepts valid campaign payload with budget", () => {
       const valid = {
         campaignName: "Holiday Sale 2026",
         commissionRate: "15",
@@ -68,24 +74,84 @@ describe("Validation Schemas & Error Mapping Suite (#74)", () => {
       expect(result.success).toBe(true);
     });
 
-    it("accepts optional budget when omitted or empty", () => {
-      const validWithoutBudget = {
+    it("requires budget and rejects missing, empty, or non-positive budget", () => {
+      const missingBudget = {
         campaignName: "Spring Promo",
         commissionRate: "10",
         clearingPeriod: "3600",
       };
-      expect(createCampaignSchema.safeParse(validWithoutBudget).success).toBe(true);
+      expect(createCampaignSchema.safeParse(missingBudget).success).toBe(false);
+
+      const emptyBudget = {
+        ...missingBudget,
+        budget: "",
+      };
+      expect(createCampaignSchema.safeParse(emptyBudget).success).toBe(false);
+
+      const zeroBudget = {
+        ...missingBudget,
+        budget: "0",
+      };
+      expect(createCampaignSchema.safeParse(zeroBudget).success).toBe(false);
+
+      const negativeBudget = {
+        ...missingBudget,
+        budget: "-50",
+      };
+      expect(createCampaignSchema.safeParse(negativeBudget).success).toBe(false);
+    });
+
+    it("enforces maxDecimals precision dynamically using getCreateCampaignSchema", () => {
+      // 7 decimals for XLM
+      const xlmSchema = getCreateCampaignSchema(7);
+      expect(
+        xlmSchema.safeParse({
+          campaignName: "XLM Campaign",
+          commissionRate: "10",
+          budget: "100.1234567",
+          clearingPeriod: "3600",
+        }).success,
+      ).toBe(true);
+      expect(
+        xlmSchema.safeParse({
+          campaignName: "XLM Campaign",
+          commissionRate: "10",
+          budget: "100.12345678",
+          clearingPeriod: "3600",
+        }).success,
+      ).toBe(false);
+
+      // 2 decimals (e.g., standard fiat token)
+      const fiatSchema = getCreateCampaignSchema(2);
+      expect(
+        fiatSchema.safeParse({
+          campaignName: "Fiat Campaign",
+          commissionRate: "10",
+          budget: "100.25",
+          clearingPeriod: "3600",
+        }).success,
+      ).toBe(true);
+      expect(
+        fiatSchema.safeParse({
+          campaignName: "Fiat Campaign",
+          commissionRate: "10",
+          budget: "100.255",
+          clearingPeriod: "3600",
+        }).success,
+      ).toBe(false);
     });
 
     it("rejects invalid campaign names", () => {
       const short = {
         campaignName: "ab",
         commissionRate: "10",
+        budget: "100",
         clearingPeriod: "3600",
       };
       const long = {
         campaignName: "a".repeat(65),
         commissionRate: "10",
+        budget: "100",
         clearingPeriod: "3600",
       };
       expect(createCampaignSchema.safeParse(short).success).toBe(false);
@@ -97,6 +163,7 @@ describe("Validation Schemas & Error Mapping Suite (#74)", () => {
         createCampaignSchema.safeParse({
           campaignName: "Test Campaign",
           commissionRate: "0",
+          budget: "100",
           clearingPeriod: "3600",
         }).success,
       ).toBe(false);
@@ -105,6 +172,7 @@ describe("Validation Schemas & Error Mapping Suite (#74)", () => {
         createCampaignSchema.safeParse({
           campaignName: "Test Campaign",
           commissionRate: "51",
+          budget: "100",
           clearingPeriod: "3600",
         }).success,
       ).toBe(false);
@@ -113,6 +181,7 @@ describe("Validation Schemas & Error Mapping Suite (#74)", () => {
         createCampaignSchema.safeParse({
           campaignName: "Test Campaign",
           commissionRate: "15abc",
+          budget: "100",
           clearingPeriod: "3600",
         }).success,
       ).toBe(false);
@@ -123,6 +192,7 @@ describe("Validation Schemas & Error Mapping Suite (#74)", () => {
         createCampaignSchema.safeParse({
           campaignName: "Test Campaign",
           commissionRate: "10",
+          budget: "100",
           clearingPeriod: "3599",
         }).success,
       ).toBe(false);
@@ -131,6 +201,7 @@ describe("Validation Schemas & Error Mapping Suite (#74)", () => {
         createCampaignSchema.safeParse({
           campaignName: "Test Campaign",
           commissionRate: "10",
+          budget: "100",
           clearingPeriod: "3600",
         }).success,
       ).toBe(true);
@@ -193,9 +264,26 @@ describe("Validation Schemas & Error Mapping Suite (#74)", () => {
         }).success,
       ).toBe(true);
 
+      // Rejects invalid checksum / format
       expect(
         registerUserRequestSchema.safeParse({
           walletAddress: "INVALID",
+          role: "AFFILIATE",
+        }).success,
+      ).toBe(false);
+
+      // Rejects contract address (only public keys allowed for user registration)
+      expect(
+        registerUserRequestSchema.safeParse({
+          walletAddress: validContractId,
+          role: "AFFILIATE",
+        }).success,
+      ).toBe(false);
+
+      // Rejects empty role
+      expect(
+        registerUserRequestSchema.safeParse({
+          walletAddress: validPublicKey,
           role: "",
         }).success,
       ).toBe(false);
@@ -232,6 +320,7 @@ describe("Validation Schemas & Error Mapping Suite (#74)", () => {
         expect(errors.campaignName).toBeDefined();
         expect(errors.commissionRate).toBeDefined();
         expect(errors.clearingPeriod).toBeDefined();
+        expect(errors.budget).toBeDefined();
       }
     });
 
