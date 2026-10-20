@@ -90,8 +90,8 @@ middleware runtimes. It performs no disk I/O, external network calls,
 cryptography, or Node.js-specific operations. The test suite benchmarks the
 complete `withStormSaleReferral` middleware wrapper across 1,000 requests—covering
 both awaited handler responses and the void-returning continue branch—with an
-average processing time consistently below 0.1 ms per request, satisfying the
-Vercel Edge execution budget of < 5 ms.
+average processing time below 5 ms per request in the included test
+environment. Verify the < 5 ms target separately in the Vercel Edge runtime.
 
 ## Nuxt
 
