@@ -19,7 +19,7 @@ import {
   getPublicKeyForAddress,
 } from "../../lib/crypto";
 import { logSaleSchema, getFieldErrors } from "../../lib/validation";
-import { triggerConversionPostback } from "../../lib/webhookEngine";
+import { dispatchWebhookEvent, triggerConversionPostback } from "../../lib/webhookEngine";
 import { Shield, Zap, Users, FileKey } from "lucide-react";
 
 export const LogSaleForm = () => {
@@ -114,21 +114,38 @@ export const LogSaleForm = () => {
         affiliateWrappedKey,
       );
 
-      await tx.wait();
+      const waitResult = await tx.wait();
+
+      const postbackTxHash =
+        waitResult?.txHash || tx?.hash || tx?.id || "PENDING_CONFIRMED_LEDGER_TX";
+      const createdAt = new Date().toISOString();
+
+      const conversionPayload = {
+        id: payload.saleId,
+        event: "conversion.created",
+        created_at: createdAt,
+        conversion_id: payload.saleId,
+        campaign_id: data.campaignAddress,
+        campaign_address: data.campaignAddress,
+        affiliate_address: data.affiliateAddress,
+        advertiser_address: userAddress || "GADVERTISER_DEFAULT_TESTNET",
+        amount: Number(data.saleAmount),
+        currency: "XLM",
+        tx_hash: postbackTxHash,
+        status: "confirmed",
+      };
+      void dispatchWebhookEvent("conversion.created", conversionPayload);
 
       try {
-        const postbackTxHash =
-          tx?.hash || tx?.id || "PENDING_CONFIRMED_LEDGER_TX";
-
         const postbacks = await triggerConversionPostback({
           saleId: payload.saleId,
           campaignAddress: data.campaignAddress,
           affiliateAddress: data.affiliateAddress,
-          advertiserAddress: userAddress,
+          advertiserAddress: userAddress || "GADVERTISER_DEFAULT_TESTNET",
           saleAmount: data.saleAmount,
           currency: "XLM",
           stellarTxHash: postbackTxHash,
-          ledgerTimestamp: new Date().toISOString(),
+          ledgerTimestamp: createdAt,
           customerRef: data.customerData
             ? `REF_${payload.saleId.slice(-8)}`
             : "Anonymous Customer",
