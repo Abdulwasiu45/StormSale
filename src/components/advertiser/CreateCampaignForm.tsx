@@ -63,6 +63,8 @@ export const CreateCampaignForm = () => {
     refreshTokenAllowance,
     approveTokenAllowance,
     assetBalances,
+    isMultiSigAccount,
+    openMultiSigModal,
   } = useWeb3();
   const { showNotification } = useNotification();
 
@@ -777,6 +779,24 @@ export const CreateCampaignForm = () => {
 
               {/* ACTION BUTTONS: Sequential 1-Click vs Step-by-Step */}
               <div className="space-y-3 pt-2">
+                {isMultiSigAccount && (
+                  <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-center justify-between text-xs text-amber-800 dark:text-amber-300">
+                    <div className="flex items-center space-x-2">
+                      <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>
+                        Multi-signature escrow approval active. Co-signer signatures can be
+                        coordinated via SEP-0030.
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => openMultiSigModal()}
+                      className="text-xs font-bold underline hover:text-amber-700 ml-2 shrink-0 cursor-pointer"
+                    >
+                      Multi-Sig Console
+                    </button>
+                  </div>
+                )}
                 {!isAllowanceSufficient && budgetNum > 0 ? (
                   <div className="space-y-3">
                     <Button

@@ -26,6 +26,8 @@ import type { ClaimableCampaignItem, BatchClaimReceipt } from "../lib/batchClaim
 import type { SplitPlan } from "../lib/commissionSplit";
 import type { PasskeyCredentialRecord } from "../lib/passkeySigner";
 import { purgeOnLogout } from "../lib/storage";
+import type { MultiSigAccountInfo } from "../lib/multisig";
+import { inspectMultiSigAccount } from "../lib/multisig";
 
 export interface Web3ContextType {
   userAddress: string | null;
@@ -105,6 +107,16 @@ export interface Web3ContextType {
     assetCode?: SupportedEscrowAssetCode,
   ) => Promise<{ success: boolean; txHash?: string }>;
 
+  // Stellar SEP-0030 Multi-Signature Campaign Escrow
+  multiSigInfo: MultiSigAccountInfo | null;
+  isMultiSigAccount: boolean;
+  isMultiSigModalOpen: boolean;
+  activeMultiSigXdr: string | null;
+  activeMultiSigDescription: string | null;
+  openMultiSigModal: (initialXdr?: string, actionDescription?: string) => void;
+  closeMultiSigModal: () => void;
+  refreshMultiSigInfo: (address?: string) => Promise<MultiSigAccountInfo | null>;
+
   // Compatibility helpers for legacy form callers
   factoryContract: any;
   getCampaignContract: (address: string) => any;
@@ -131,8 +143,45 @@ export function Web3Provider({ children }: { children: ReactNode }) {
   const [ledgerBipPath, setLedgerBipPath] = useState<string>("44'/148'/0'");
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
 
+  // Stellar SEP-0030 Multi-Sig State
+  const [multiSigInfo, setMultiSigInfo] = useState<MultiSigAccountInfo | null>(null);
+  const [isMultiSigModalOpen, setIsMultiSigModalOpen] = useState(false);
+  const [activeMultiSigXdr, setActiveMultiSigXdr] = useState<string | null>(null);
+  const [activeMultiSigDescription, setActiveMultiSigDescription] = useState<string | null>(null);
+
   const openWalletModal = () => setIsWalletModalOpen(true);
   const closeWalletModal = () => setIsWalletModalOpen(false);
+
+  const openMultiSigModal = useCallback((initialXdr?: string, actionDescription?: string) => {
+    if (initialXdr !== undefined) setActiveMultiSigXdr(initialXdr);
+    if (actionDescription !== undefined) setActiveMultiSigDescription(actionDescription);
+    setIsMultiSigModalOpen(true);
+  }, []);
+
+  const closeMultiSigModal = useCallback(() => {
+    setIsMultiSigModalOpen(false);
+  }, []);
+
+  const refreshMultiSigInfo = useCallback(
+    async (targetAddress?: string) => {
+      const addr = targetAddress || userAddress;
+      if (!addr) {
+        setMultiSigInfo(null);
+        return null;
+      }
+      try {
+        const info = await inspectMultiSigAccount(addr);
+        setMultiSigInfo(info);
+        return info;
+      } catch (err) {
+        console.warn("Could not inspect multi-sig account info:", err);
+        return null;
+      }
+    },
+    [userAddress],
+  );
+
+  const isMultiSigAccount = !!(multiSigInfo && multiSigInfo.isMultiSig);
 
   // Refresh balance whenever userAddress changes
   const refreshBalance = useCallback(async (address: string) => {
@@ -289,6 +338,8 @@ export function Web3Provider({ children }: { children: ReactNode }) {
       setIsConnected(true);
       setConnectorType(type);
 
+      await refreshMultiSigInfo(address);
+
       if (type !== "mock") {
         await refreshBalance(address);
       }
@@ -313,6 +364,10 @@ export function Web3Provider({ children }: { children: ReactNode }) {
       EURC: "0.00",
     });
     setTokenAllowance(0);
+    setMultiSigInfo(null);
+    setIsMultiSigModalOpen(false);
+    setActiveMultiSigXdr(null);
+    setActiveMultiSigDescription(null);
     void purgeOnLogout();
   };
 
@@ -622,6 +677,14 @@ export function Web3Provider({ children }: { children: ReactNode }) {
         approveTokenAllowance,
         factoryContract,
         getCampaignContract,
+        multiSigInfo,
+        isMultiSigAccount,
+        isMultiSigModalOpen,
+        activeMultiSigXdr,
+        activeMultiSigDescription,
+        openMultiSigModal,
+        closeMultiSigModal,
+        refreshMultiSigInfo,
         provider: null,
         signer: null,
         switchToStellarNetwork,

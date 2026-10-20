@@ -9,7 +9,16 @@ import { motion, AnimatePresence } from "framer-motion";
 import logo from "../../assets/logo2.png";
 
 export const Header = () => {
-  const { userAddress, openWalletModal, disconnectWallet, isConnected, xlmBalance } = useWeb3();
+  const {
+    userAddress,
+    openWalletModal,
+    disconnectWallet,
+    isConnected,
+    xlmBalance,
+    isMultiSigAccount,
+    multiSigInfo,
+    openMultiSigModal,
+  } = useWeb3();
   const { isTelegram, user, platform } = useTelegram();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -82,6 +91,20 @@ export const Header = () => {
                   </span>
                 </TerminologyTooltip>
               </div>
+
+              {isMultiSigAccount && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => openMultiSigModal()}
+                  className="h-9 px-3 rounded-xl border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 font-bold text-xs transition-all flex items-center space-x-1.5"
+                  title="Stellar SEP-0030 Multi-Signature Escrow Coordination"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>Multi-Sig ({multiSigInfo?.signers.length || 2})</span>
+                </Button>
+              )}
+
               <Button
                 variant="outline"
                 size="sm"
@@ -170,6 +193,24 @@ export const Header = () => {
             <div className="pb-1">
               <TerminologyGuideButton className="w-full justify-center" />
             </div>
+
+            {isConnected && isMultiSigAccount && (
+              <button
+                onClick={() => {
+                  openMultiSigModal();
+                  setIsMobileMenuOpen(false);
+                }}
+                className="w-full flex items-center justify-between p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-semibold mb-2"
+              >
+                <span className="flex items-center space-x-2">
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>Multi-Sig Escrow Approvals</span>
+                </span>
+                <span className="text-[10px] bg-amber-500/20 px-1.5 py-0.5 rounded font-mono font-bold">
+                  SEP-0030
+                </span>
+              </button>
+            )}
 
             <div className="grid grid-cols-2 gap-2">
               {navLinks.map((item) => (
