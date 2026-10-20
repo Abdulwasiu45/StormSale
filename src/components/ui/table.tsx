@@ -1,5 +1,6 @@
 import * as React from "react";
 import { useState, useMemo, useCallback } from "react";
+import { StrKey } from "@stellar/stellar-sdk";
 import { cn } from "../../lib/utils";
 import {
   ArrowUpDown,
@@ -119,19 +120,33 @@ export const AddressCell: React.FC<AddressCellProps> = ({
       ? `${address.slice(0, truncateChars)}...${address.slice(-truncateChars)}`
       : address;
 
-  const handleCopy = (e: React.MouseEvent) => {
+  const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (navigator?.clipboard?.writeText) {
-      navigator.clipboard.writeText(address);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      try {
+        await navigator.clipboard.writeText(address);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      } catch {
+        setCopied(false);
+      }
     }
   };
 
-  const defaultUrl = address.startsWith("C")
-    ? `https://stellar.expert/explorer/${network}/contract/${address}`
-    : `https://stellar.expert/explorer/${network}/account/${address}`;
-  const explorerUrl = explorerBaseUrl ? `${explorerBaseUrl}/${address}` : defaultUrl;
+  const isContract = StrKey.isValidContract(address);
+  const isAccount = StrKey.isValidEd25519PublicKey(address);
+  const isMuxed = StrKey.isValidMed25519PublicKey(address);
+  const isValidAddress = (isContract || isAccount) && !isMuxed;
+
+  const encodedAddress = encodeURIComponent(address);
+  const defaultUrl = isContract
+    ? `https://stellar.expert/explorer/${network}/contract/${encodedAddress}`
+    : `https://stellar.expert/explorer/${network}/account/${encodedAddress}`;
+  const explorerUrl = isValidAddress
+    ? explorerBaseUrl
+      ? `${explorerBaseUrl}/${encodedAddress}`
+      : defaultUrl
+    : null;
 
   return (
     <div
@@ -152,7 +167,7 @@ export const AddressCell: React.FC<AddressCellProps> = ({
         </button>
       )}
 
-      {showExplorerLink && (
+      {showExplorerLink && explorerUrl && (
         <a
           href={explorerUrl}
           target="_blank"
@@ -197,17 +212,22 @@ export const TxHashCell: React.FC<TxHashCellProps> = ({
   const truncated =
     hash.length > truncateChars + 4 ? `${hash.slice(0, truncateChars)}...${hash.slice(-4)}` : hash;
 
-  const handleCopy = (e: React.MouseEvent) => {
+  const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (navigator?.clipboard?.writeText) {
-      navigator.clipboard.writeText(hash);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      try {
+        await navigator.clipboard.writeText(hash);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      } catch {
+        setCopied(false);
+      }
     }
   };
 
-  const defaultUrl = `https://stellar.expert/explorer/${network}/tx/${hash}`;
-  const explorerUrl = explorerBaseUrl ? `${explorerBaseUrl}/${hash}` : defaultUrl;
+  const encodedHash = encodeURIComponent(hash);
+  const defaultUrl = `https://stellar.expert/explorer/${network}/tx/${encodedHash}`;
+  const explorerUrl = explorerBaseUrl ? `${explorerBaseUrl}/${encodedHash}` : defaultUrl;
 
   return (
     <div
@@ -337,6 +357,7 @@ export function TableSkeleton<TData>({ columns, rowCount = 5 }: TableSkeletonPro
 export interface DataTableProps<TData> {
   columns: ColumnDef<TData>[];
   data: TData[];
+  getRowId?: (row: TData, index: number) => string;
   isLoading?: boolean;
   skeletonRowCount?: number;
   emptyMessage?: React.ReactNode;
@@ -365,9 +386,14 @@ export interface DataTableProps<TData> {
   onRowClick?: (row: TData, index: number) => void;
 }
 
+export function getColumnId<TData>(col: ColumnDef<TData>, index: number): string {
+  return (col.id || col.accessorKey || `col-${index}`) as string;
+}
+
 export function DataTable<TData>({
   columns,
   data,
+  getRowId,
   isLoading = false,
   skeletonRowCount = 5,
   emptyMessage = "No matching records found.",
@@ -495,9 +521,9 @@ export function DataTable<TData>({
     }
 
     const colMap = new Map<string, ColumnDef<TData>>();
-    columns.forEach((col) => {
-      const colId = (col.id || col.accessorKey) as string;
-      if (colId) colMap.set(colId, col);
+    columns.forEach((col, index) => {
+      const colId = getColumnId(col, index);
+      colMap.set(colId, col);
     });
 
     return [...filteredData].sort((a, b) => {
@@ -542,13 +568,18 @@ export function DataTable<TData>({
     ? (controlledPageCount ?? Math.ceil(totalCount / pagination.pageSize))
     : Math.max(1, Math.ceil(sortedData.length / pagination.pageSize));
 
+  const maxPageIndex = Math.max(0, calculatedPageCount - 1);
+  const effectivePageIndex = manualPagination
+    ? pagination.pageIndex
+    : Math.min(Math.max(0, pagination.pageIndex), maxPageIndex);
+
   const paginatedData = useMemo(() => {
     if (!enablePagination || manualPagination) {
       return sortedData;
     }
-    const start = pagination.pageIndex * pagination.pageSize;
+    const start = effectivePageIndex * pagination.pageSize;
     return sortedData.slice(start, start + pagination.pageSize);
-  }, [enablePagination, manualPagination, pagination.pageIndex, pagination.pageSize, sortedData]);
+  }, [effectivePageIndex, enablePagination, manualPagination, pagination.pageSize, sortedData]);
 
   // Helper row value extraction
   const getCellValue = (row: TData, col: ColumnDef<TData>) => {
@@ -556,12 +587,8 @@ export function DataTable<TData>({
     return key ? row[key] : undefined;
   };
 
-  const getColumnId = (col: ColumnDef<TData>, index: number) => {
-    return (col.id || col.accessorKey || `col-${index}`) as string;
-  };
-
-  const startEntry = totalCount === 0 ? 0 : pagination.pageIndex * pagination.pageSize + 1;
-  const endEntry = Math.min(totalCount, (pagination.pageIndex + 1) * pagination.pageSize);
+  const startEntry = totalCount === 0 ? 0 : effectivePageIndex * pagination.pageSize + 1;
+  const endEntry = Math.min(totalCount, (effectivePageIndex + 1) * pagination.pageSize);
 
   return (
     <div className={cn("space-y-4 w-full", containerClassName)}>
@@ -669,37 +696,54 @@ export function DataTable<TData>({
                 </TableCell>
               </TableRow>
             ) : (
-              paginatedData.map((row, rowIndex) => (
-                <TableRow
-                  key={`data-row-${rowIndex}`}
-                  onClick={() => onRowClick?.(row, rowIndex)}
-                  className={cn(
-                    "border-b border-slate-100 dark:border-zinc-800/80 transition-colors",
-                    onRowClick && "cursor-pointer hover:bg-slate-50 dark:hover:bg-zinc-800/50",
-                  )}
-                >
-                  {columns.map((column, colIndex) => {
-                    const columnId = getColumnId(column, colIndex);
-                    const value = getCellValue(row, column);
+              paginatedData.map((row, rowIndex) => {
+                const rowKey = getRowId ? getRowId(row, rowIndex) : `data-row-${rowIndex}`;
+                const isClickable = Boolean(onRowClick);
 
-                    return (
-                      <TableCell
-                        key={columnId}
-                        className={cn(
-                          "py-4 text-xs text-zinc-800 dark:text-zinc-200",
-                          column.cellClassName,
-                        )}
-                      >
-                        {column.cell
-                          ? column.cell({ row, value, index: rowIndex })
-                          : value !== null && value !== undefined
-                            ? String(value)
-                            : "—"}
-                      </TableCell>
-                    );
-                  })}
-                </TableRow>
-              ))
+                const handleKeyDown = (e: React.KeyboardEvent<HTMLTableRowElement>) => {
+                  if (!onRowClick) return;
+                  if (e.target !== e.currentTarget) return;
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onRowClick(row, rowIndex);
+                  }
+                };
+
+                return (
+                  <TableRow
+                    key={rowKey}
+                    onClick={() => onRowClick?.(row, rowIndex)}
+                    onKeyDown={isClickable ? handleKeyDown : undefined}
+                    tabIndex={isClickable ? 0 : undefined}
+                    className={cn(
+                      "border-b border-slate-100 dark:border-zinc-800/80 transition-colors",
+                      isClickable &&
+                        "cursor-pointer hover:bg-slate-50 dark:hover:bg-zinc-800/50 focus:outline-none focus-visible:bg-slate-50 dark:focus-visible:bg-zinc-800/60 focus-visible:ring-1 focus-visible:ring-indigo-500",
+                    )}
+                  >
+                    {columns.map((column, colIndex) => {
+                      const columnId = getColumnId(column, colIndex);
+                      const value = getCellValue(row, column);
+
+                      return (
+                        <TableCell
+                          key={columnId}
+                          className={cn(
+                            "py-4 text-xs text-zinc-800 dark:text-zinc-200",
+                            column.cellClassName,
+                          )}
+                        >
+                          {column.cell
+                            ? column.cell({ row, value, index: rowIndex })
+                            : value !== null && value !== undefined
+                              ? String(value)
+                              : "—"}
+                        </TableCell>
+                      );
+                    })}
+                  </TableRow>
+                );
+              })
             )}
           </TableBody>
         </Table>
@@ -746,7 +790,7 @@ export function DataTable<TData>({
             <button
               type="button"
               onClick={() => updatePagination({ ...pagination, pageIndex: 0 })}
-              disabled={pagination.pageIndex === 0 || isLoading}
+              disabled={effectivePageIndex === 0 || isLoading}
               className="p-1.5 rounded-lg border border-slate-200 dark:border-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               aria-label="First page"
               title="First page"
@@ -758,10 +802,10 @@ export function DataTable<TData>({
               onClick={() =>
                 updatePagination({
                   ...pagination,
-                  pageIndex: Math.max(0, pagination.pageIndex - 1),
+                  pageIndex: Math.max(0, effectivePageIndex - 1),
                 })
               }
-              disabled={pagination.pageIndex === 0 || isLoading}
+              disabled={effectivePageIndex === 0 || isLoading}
               className="p-1.5 rounded-lg border border-slate-200 dark:border-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               aria-label="Previous page"
               title="Previous page"
@@ -770,7 +814,7 @@ export function DataTable<TData>({
             </button>
 
             <span className="px-3 py-1 font-semibold text-zinc-800 dark:text-zinc-200">
-              {`Page ${pagination.pageIndex + 1} of ${calculatedPageCount}`}
+              {`Page ${effectivePageIndex + 1} of ${calculatedPageCount}`}
             </span>
 
             <button
@@ -778,10 +822,10 @@ export function DataTable<TData>({
               onClick={() =>
                 updatePagination({
                   ...pagination,
-                  pageIndex: Math.min(calculatedPageCount - 1, pagination.pageIndex + 1),
+                  pageIndex: Math.min(calculatedPageCount - 1, effectivePageIndex + 1),
                 })
               }
-              disabled={pagination.pageIndex >= calculatedPageCount - 1 || isLoading}
+              disabled={effectivePageIndex >= calculatedPageCount - 1 || isLoading}
               className="p-1.5 rounded-lg border border-slate-200 dark:border-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               aria-label="Next page"
               title="Next page"
@@ -793,7 +837,7 @@ export function DataTable<TData>({
               onClick={() =>
                 updatePagination({ ...pagination, pageIndex: calculatedPageCount - 1 })
               }
-              disabled={pagination.pageIndex >= calculatedPageCount - 1 || isLoading}
+              disabled={effectivePageIndex >= calculatedPageCount - 1 || isLoading}
               className="p-1.5 rounded-lg border border-slate-200 dark:border-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               aria-label="Last page"
               title="Last page"

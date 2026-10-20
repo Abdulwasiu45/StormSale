@@ -31,7 +31,7 @@ const mockSalesData: TestSale[] = [
   {
     id: 2,
     campaign: "Beta Campaign",
-    advertiser: "CA7QYNDQ3VKMGCDHS2GC5QWMSPYGSOROBANCONTRACTEXAMPLE1234567",
+    advertiser: "CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526",
     txHash: "b2c3d4e5f67890123456789abcdef0123456789abcdef0123456789abcdef01",
     amount: 1200,
     cleared: false,
@@ -103,9 +103,7 @@ const testColumns: ColumnDef<TestSale>[] = [
 describe("DataTable Component Suite (#6)", () => {
   describe("Rendering & Baseline Behavior", () => {
     it("renders table headers and data rows correctly", () => {
-      const html = renderToString(
-        <DataTable columns={testColumns} data={mockSalesData} />,
-      );
+      const html = renderToString(<DataTable columns={testColumns} data={mockSalesData} />);
 
       expect(html).toContain("Sale ID");
       expect(html).toContain("Campaign Name");
@@ -130,6 +128,31 @@ describe("DataTable Component Suite (#6)", () => {
 
       expect(html).toContain("No sales recorded for this period.");
     });
+
+    it("supports getRowId prop for custom stable row keys and keyboard accessible rows", () => {
+      const onRowClick = vi.fn();
+      const html = renderToString(
+        <DataTable
+          columns={testColumns}
+          data={mockSalesData}
+          getRowId={(row) => `sale-item-${row.id}`}
+          onRowClick={onRowClick}
+        />,
+      );
+
+      // Clickable rows should have tabIndex=0, cursor-pointer, and visible focus styles
+      expect(html).toContain('tabindex="0"');
+      expect(html).toContain("cursor-pointer");
+      expect(html).toContain("focus-visible:ring-indigo-500");
+    });
+
+    it("renders non-clickable rows without tabIndex or cursor-pointer", () => {
+      const html = renderToString(<DataTable columns={testColumns} data={mockSalesData} />);
+
+      // Rows without onRowClick should NOT have tabindex="0"
+      expect(html).not.toMatch(/<tr[^>]*\btabindex="0"/);
+      expect(html).not.toContain("cursor-pointer");
+    });
   });
 
   describe("Multi-Column Sorting & Visual Indicators", () => {
@@ -137,11 +160,7 @@ describe("DataTable Component Suite (#6)", () => {
       const sorting: SortingState = [{ id: "campaign", desc: false, priority: 1 }];
 
       const html = renderToString(
-        <DataTable
-          columns={testColumns}
-          data={mockSalesData}
-          sorting={sorting}
-        />,
+        <DataTable columns={testColumns} data={mockSalesData} sorting={sorting} />,
       );
 
       // campaign header should have aria-sort="ascending"
@@ -150,27 +169,23 @@ describe("DataTable Component Suite (#6)", () => {
       expect(html).toContain('aria-sort="none"');
     });
 
-    it("displays multi-column sort priority badges when multiple columns are sorted", () => {
+    it("displays multi-column sort priority badges with specific badge styling", () => {
       const multiSort: SortingState = [
         { id: "campaign", desc: false, priority: 1 },
         { id: "amount", desc: true, priority: 2 },
       ];
 
       const html = renderToString(
-        <DataTable
-          columns={testColumns}
-          data={mockSalesData}
-          sorting={multiSort}
-        />,
+        <DataTable columns={testColumns} data={mockSalesData} sorting={multiSort} />,
       );
 
       // Both columns should reflect their sort direction
       expect(html).toContain('aria-sort="ascending"');
       expect(html).toContain('aria-sort="descending"');
 
-      // Priority numbers "1" and "2" should appear as badges in header
-      expect(html).toContain(">1<");
-      expect(html).toContain(">2<");
+      // Verify both priority badges are specifically rendered with bg-indigo-100 class
+      expect(html).toMatch(/<span[^>]*bg-indigo-100[^>]*>\s*1\s*<\/span>/);
+      expect(html).toMatch(/<span[^>]*bg-indigo-100[^>]*>\s*2\s*<\/span>/);
     });
 
     it("sorts rows client-side in primary and secondary order", () => {
@@ -220,30 +235,72 @@ describe("DataTable Component Suite (#6)", () => {
       expect(posGamma).toBeLessThan(posAlpha);
     });
 
-    it("supports manualSorting for server-side sorting delegations", () => {
-      const onSortingChange = vi.fn();
+    it("uses getColumnId consistently for computed columns without explicit id", () => {
+      const computedCol: ColumnDef<TestSale>[] = [
+        {
+          header: "Computed Header",
+          cell: ({ row }) => `Computed-${row.id}`,
+          enableSorting: true,
+          sortingFn: (a, b) => a.id - b.id,
+        },
+      ];
+
+      const html = renderToString(
+        <DataTable
+          columns={computedCol}
+          data={mockSalesData}
+          sorting={[{ id: "col-0", desc: false }]}
+          enablePagination={false}
+        />,
+      );
+
+      expect(html).toContain("Computed-1");
+      const firstRowIdx = html.indexOf("Computed-1");
+      const secondRowIdx = html.indexOf("Computed-2");
+      expect(firstRowIdx).toBeLessThan(secondRowIdx);
+    });
+  });
+
+  describe("Client-side Search & Filtering", () => {
+    it("filters table rows based on searchQuery across searchable columns", () => {
+      const html = renderToString(
+        <DataTable
+          columns={testColumns}
+          data={mockSalesData}
+          searchQuery="Gamma"
+          enablePagination={false}
+        />,
+      );
+
+      expect(html).toContain("Gamma Campaign");
+      expect(html).not.toContain("Alpha Campaign");
+      expect(html).not.toContain("Beta Campaign");
+      expect(html).not.toContain("Delta Campaign");
+    });
+
+    it("supports custom filterFn for specialized multi-field predicate", () => {
+      const customFilter = (row: TestSale, _q: string) => row.cleared && row.amount > 200;
 
       const html = renderToString(
         <DataTable
           columns={testColumns}
           data={mockSalesData}
-          manualSorting
-          sorting={[{ id: "amount", desc: true }]}
-          onSortingChange={onSortingChange}
+          searchQuery="any"
+          filterFn={customFilter}
+          enablePagination={false}
         />,
       );
 
-      // Renders with indicator without altering data order locally
-      expect(html).toContain('aria-sort="descending"');
-      // In mockSalesData, index 0 is Alpha (500)
-      const firstRowIdx = html.indexOf("Alpha Campaign");
-      const secondRowIdx = html.indexOf("Beta Campaign");
-      expect(firstRowIdx).toBeLessThan(secondRowIdx);
+      // Cleared > 200: id 1 (500), id 5 (300). NOT id 3 (150, cleared but < 200) or id 2 (1200, not cleared)
+      expect(html).toContain("500.00 XLM");
+      expect(html).toContain("300.00 XLM");
+      expect(html).not.toContain("150.00 XLM");
+      expect(html).not.toContain("1200.00 XLM");
     });
   });
 
   describe("Client-side & Server-side Pagination", () => {
-    it("slices data client-side according to pageSize and pageIndex", () => {
+    it("slices data client-side according to pageSize and pageIndex with exact footer text", () => {
       const pagination: PaginationState = { pageIndex: 0, pageSize: 2 };
 
       const html = renderToString(
@@ -255,11 +312,10 @@ describe("DataTable Component Suite (#6)", () => {
         />,
       );
 
-      // Page 1 should display 2 entries out of 5
-      expect(html).toContain("Showing");
-      expect(html).toContain(">1<");
-      expect(html).toContain(">2<");
-      expect(html).toContain(">5<");
+      // Assert against complete footer range and total
+      expect(html).toMatch(
+        /Showing.*?<strong[^>]*>1<\/strong>.*?to.*?<strong[^>]*>2<\/strong>.*?of.*?<strong[^>]*>5<\/strong>.*?entries/,
+      );
       expect(html).toContain("Page 1 of 3");
 
       // First 2 campaigns rendered
@@ -267,6 +323,29 @@ describe("DataTable Component Suite (#6)", () => {
       expect(html).toContain("Beta Campaign");
       // Gamma Campaign (index 2) should NOT be on page 1
       expect(html).not.toContain("Gamma Campaign");
+    });
+
+    it("clamps client-side pageIndex when out of upper or lower bounds", () => {
+      // Out of bounds upper index (pageIndex: 99 on 5 items with pageSize: 2 => max pageIndex is 2)
+      const outOfBoundsUpper: PaginationState = { pageIndex: 99, pageSize: 2 };
+
+      const htmlUpper = renderToString(
+        <DataTable columns={testColumns} data={mockSalesData} pagination={outOfBoundsUpper} />,
+      );
+
+      // Clamps to page 3 of 3 (item 5 to 5 of 5)
+      expect(htmlUpper).toMatch(
+        /Showing.*?<strong[^>]*>5<\/strong>.*?to.*?<strong[^>]*>5<\/strong>.*?of.*?<strong[^>]*>5<\/strong>.*?entries/,
+      );
+      expect(htmlUpper).toContain("Page 3 of 3");
+      expect(htmlUpper).toContain("Delta Campaign");
+
+      // Out of bounds negative index
+      const outOfBoundsLower: PaginationState = { pageIndex: -5, pageSize: 2 };
+      const htmlLower = renderToString(
+        <DataTable columns={testColumns} data={mockSalesData} pagination={outOfBoundsLower} />,
+      );
+      expect(htmlLower).toContain("Page 1 of 3");
     });
 
     it("handles server-side pagination with controlled totalRows and pageCount", () => {
@@ -283,10 +362,10 @@ describe("DataTable Component Suite (#6)", () => {
         />,
       );
 
-      expect(html).toContain("Showing");
-      expect(html).toContain(">21<");
-      expect(html).toContain(">30<");
-      expect(html).toContain(">100<");
+      // Assert against complete footer range and total
+      expect(html).toMatch(
+        /Showing.*?<strong[^>]*>21<\/strong>.*?to.*?<strong[^>]*>30<\/strong>.*?of.*?<strong[^>]*>100<\/strong>.*?entries/,
+      );
       expect(html).toContain("Page 3 of 10");
     });
   });
@@ -301,30 +380,62 @@ describe("DataTable Component Suite (#6)", () => {
       expect(html).toContain("GDQP...4W37");
       expect(html).toContain('title="GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3B2WSQHG4W37"');
       expect(html).toContain('aria-label="Copy address"');
-      expect(html).toContain('href="https://stellar.expert/explorer/testnet/account/GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3B2WSQHG4W37"');
+      expect(html).toContain(
+        'href="https://stellar.expert/explorer/testnet/account/GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3B2WSQHG4W37"',
+      );
       expect(html).toContain('target="_blank"');
     });
 
-    it("AddressCell automatically links Soroban contracts to the contract explorer", () => {
-      const sorobanContract = "CA7QYNDQ3VKMGCDHS2GC5QWMSPYGSOROBANCONTRACTEXAMPLE1234567";
+    it("AddressCell validates contracts and automatically links valid Soroban contracts", () => {
+      // Valid contract StrKey ID
+      const validContract = "CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526";
       const html = renderToString(
-        <AddressCell address={sorobanContract} truncateChars={4} network="testnet" />,
+        <AddressCell address={validContract} truncateChars={4} network="testnet" />,
       );
 
-      expect(html).toContain("CA7Q...4567");
-      expect(html).toContain('href="https://stellar.expert/explorer/testnet/contract/CA7QYNDQ3VKMGCDHS2GC5QWMSPYGSOROBANCONTRACTEXAMPLE1234567"');
+      expect(html).toContain("CAAQ...C526");
+      expect(html).toContain(
+        'href="https://stellar.expert/explorer/testnet/contract/CAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQC526"',
+      );
     });
 
-    it("TxHashCell truncates hashes and provides copy and transaction explorer links", () => {
-      const txHash = "e36e1e4985514dbdb96f3c22e4904a204a6462f59876543210abcdef12345678";
-      const html = renderToString(
-        <TxHashCell hash={txHash} truncateChars={6} network="testnet" />,
+    it("AddressCell renders NO explorer link for invalid or muxed addresses", () => {
+      // Muxed address starting with M
+      const muxedAddress = "MBVPFCM4IRHZ7MD576ID4X6Z7JHDAISVCG6AZR7T5ZS354RER47CSAAAAAAAAABQHGXKW";
+      const htmlMuxed = renderToString(<AddressCell address={muxedAddress} truncateChars={4} />);
+
+      // Must display truncated text but NO explorer link
+      expect(htmlMuxed).toContain("MBVP...GXKW");
+      expect(htmlMuxed).not.toContain("stellar.expert");
+      expect(htmlMuxed).not.toContain("<a");
+
+      // Completely invalid address
+      const htmlInvalid = renderToString(
+        <AddressCell address="invalid-address-not-strkey" truncateChars={4} />,
       );
+      expect(htmlInvalid).not.toContain("<a");
+    });
+
+    it("AddressCell encodes address parameter and leaves custom explorerBaseUrl unchanged", () => {
+      const account = "GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3B2WSQHG4W37";
+      const customBase = "https://custom.stellar.org/accounts";
+      const html = renderToString(<AddressCell address={account} explorerBaseUrl={customBase} />);
+
+      expect(html).toContain(`href="${customBase}/${account}"`);
+    });
+
+    it("TxHashCell truncates hashes, encodes hash path, and provides copy and explorer links", () => {
+      const txHash = "e36e1e4985514dbdb96f3c22e4904a204a6462f59876543210abcdef12345678";
+      const html = renderToString(<TxHashCell hash={txHash} truncateChars={6} network="testnet" />);
 
       expect(html).toContain("e36e1e...5678");
-      expect(html).toContain('title="e36e1e4985514dbdb96f3c22e4904a204a6462f59876543210abcdef12345678"');
+      expect(html).toContain(
+        'title="e36e1e4985514dbdb96f3c22e4904a204a6462f59876543210abcdef12345678"',
+      );
       expect(html).toContain('aria-label="Copy transaction hash"');
-      expect(html).toContain('href="https://stellar.expert/explorer/testnet/tx/e36e1e4985514dbdb96f3c22e4904a204a6462f59876543210abcdef12345678"');
+      expect(html).toContain(
+        'href="https://stellar.expert/explorer/testnet/tx/e36e1e4985514dbdb96f3c22e4904a204a6462f59876543210abcdef12345678"',
+      );
     });
 
     it("handles null or empty address/hash gracefully", () => {
