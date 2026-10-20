@@ -3,7 +3,7 @@ import { useWeb3 } from "../../hooks/useWeb3";
 import { useTelegram } from "../../hooks/useTelegram";
 import { ThemeToggle } from "./ThemeToggle";
 import { TerminologyTooltip, TerminologyGuideButton } from "../ui/tooltip";
-import { Wallet, Menu, X, Coins, ShieldCheck, Send } from "lucide-react";
+import { Wallet, Menu, X, Coins, ShieldCheck, Send, Activity } from "lucide-react";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import logo from "../../assets/logo2.png";
@@ -18,6 +18,8 @@ export const Header = () => {
     isMultiSigAccount,
     multiSigInfo,
     openMultiSigModal,
+    activeRpcEndpoint,
+    openRpcModal,
   } = useWeb3();
   const { isTelegram, user, platform } = useTelegram();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -76,6 +78,38 @@ export const Header = () => {
         {/* Desktop Actions */}
         <div className="hidden sm:flex items-center space-x-3">
           <TerminologyGuideButton />
+          {/* RPC Status Indicator Pill */}
+          <button
+            type="button"
+            onClick={openRpcModal}
+            className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-100/70 dark:bg-zinc-900/70 hover:bg-slate-200/60 dark:hover:bg-zinc-800 transition-colors text-xs font-semibold cursor-pointer"
+            title={`Active Soroban & BlockDAG RPC: ${activeRpcEndpoint?.name || "Primary"} (${activeRpcEndpoint?.status || "healthy"}). Click to inspect fallbacks.`}
+          >
+            <span
+              className={`w-2 h-2 rounded-full ${
+                activeRpcEndpoint?.status === "healthy"
+                  ? "bg-emerald-500 animate-pulse"
+                  : activeRpcEndpoint?.status === "degraded"
+                    ? "bg-amber-500"
+                    : activeRpcEndpoint?.status === "unreachable"
+                      ? "bg-rose-500"
+                      : "bg-indigo-500"
+              }`}
+            />
+            <Activity className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" />
+            <span className="font-mono text-[11px] text-zinc-700 dark:text-zinc-300">
+              {activeRpcEndpoint?.type === "local"
+                ? "Local Node"
+                : activeRpcEndpoint?.type === "blockdag"
+                  ? "BlockDAG"
+                  : "RPC"}
+            </span>
+            {activeRpcEndpoint?.latencyMs !== null && (
+              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono hidden md:inline">
+                {activeRpcEndpoint?.latencyMs}ms
+              </span>
+            )}
+          </button>
           <ThemeToggle />
 
           {isConnected ? (
@@ -127,6 +161,28 @@ export const Header = () => {
 
         {/* Mobile / Tablet Controls (Right) */}
         <div className="flex sm:hidden items-center space-x-2">
+          {/* Mobile RPC Status Button */}
+          <button
+            type="button"
+            onClick={openRpcModal}
+            className="p-2 rounded-xl text-zinc-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 relative"
+            title="Soroban & BlockDAG RPC Health"
+            aria-label="RPC Status"
+          >
+            <span
+              className={`absolute top-1.5 right-1.5 w-2 h-2 rounded-full ${
+                activeRpcEndpoint?.status === "healthy"
+                  ? "bg-emerald-500"
+                  : activeRpcEndpoint?.status === "degraded"
+                    ? "bg-amber-500"
+                    : activeRpcEndpoint?.status === "unreachable"
+                      ? "bg-rose-500"
+                      : "bg-indigo-500"
+              }`}
+            />
+            <Activity className="w-4 h-4" />
+          </button>
+
           <ThemeToggle />
           {!isConnected ? (
             <Button

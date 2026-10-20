@@ -7,6 +7,7 @@ import { usePreference } from "./hooks/usePreference";
 import { ConnectWalletModal } from "./components/shared/ConnectWalletModal";
 import { initTelegramWebApp, syncTelegramTheme, isTelegramMiniApp } from "./lib/telegram";
 import { MultiSigApprovalModal } from "./components/shared/MultiSigApprovalModal";
+import { RpcStatusModal } from "./components/shared/RpcStatusModal";
 import { loadBrandConfig } from "./lib/branding";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { TooltipProvider } from "./components/ui/tooltip";
@@ -144,6 +145,7 @@ function Router() {
     <>
       <ConnectWalletModal />
       <MultiSigApprovalModal />
+      <RpcStatusModal />
       <Suspense fallback={<PageLoader />}>
         {!isConnected && !tmaMode ? (
           <Landing />
