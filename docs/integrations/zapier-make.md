@@ -29,10 +29,12 @@ custom webhook triggers.
    and map the fields described below.
 6. Test the action and turn on the Zap.
 
-The sample-payload builder is local and uses only fixed data and the current
-timestamp; it does no network or database work. Its unit test enforces a
-response time below 3 seconds. Delivery to the external Catch Hook is a
-separate network request and depends on that service's response time.
+Event dispatches initiate outbound deliveries within 3 seconds of triggering.
+Delivery to an external Catch Hook is an asynchronous network request.
+Because browser-based dispatch transmits an `application/json` payload along with
+custom `X-StormSale-*` signature headers, cross-origin targets must support CORS
+preflight (`OPTIONS`). Outbound delivery can be blocked if the destination does
+not approve the JSON request's custom-header preflight.
 
 ## Configure Make.com
 
@@ -158,6 +160,10 @@ JSON blueprint is not an importable Zap file.
   Zapier editor URL.
 - **Destination rejected:** use an HTTPS public hostname; private or local
   endpoints are intentionally blocked.
+- **CORS or Preflight issues:** browser-based dispatch sends `application/json`
+  with custom headers (`X-StormSale-Signature`, `X-StormSale-Event`, `X-StormSale-Delivery-Id`).
+  Cross-origin targets must allow these headers and approve the `OPTIONS` preflight;
+  delivery can be blocked if the destination rejects custom-header preflight requests.
 - **Signature validation fails:** verify against the exact raw request body and
   the endpoint's current HMAC secret.
 - **Automation stops after failures:** inspect delivery history, fix the remote

@@ -430,18 +430,57 @@ describe("Automated Conversion Postback Webhook Engine Suite", () => {
     });
 
     it.each(["campaign.created", "conversion.created", "payout.created"] as const)(
-      "creates a flat, ready-to-use %s test payload within the setup time budget",
+      "creates a flat, ready-to-use %s test payload with valid schema fields",
       (event) => {
-        const startedAt = performance.now();
         const payload = getWebhookSamplePayload(event);
 
-        expect(performance.now() - startedAt).toBeLessThan(3000);
         expect(payload).toMatchObject({ event, is_test_event: true });
         expect(payload.id).toBeTruthy();
         expect(payload.created_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
         expect(payload).not.toHaveProperty("data");
         const numericField = event === "campaign.created" ? payload.budget : payload.amount;
         if (numericField !== undefined) expect(typeof numericField).toBe("number");
+      },
+    );
+
+    it.each(["campaign.created", "conversion.created", "payout.created"] as const)(
+      "dispatches live webhook delivery for %s and calls fetch within 3000 ms",
+      async (event) => {
+        const fetchSpy = vi.fn().mockResolvedValue(
+          new Response(JSON.stringify({ success: true }), {
+            status: 200,
+            statusText: "OK",
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+        vi.stubGlobal("fetch", fetchSpy);
+
+        const liveEndpoint: WebhookEndpoint = {
+          id: `wh_live_${event.replace(".", "_")}`,
+          name: `Live ${event} endpoint`,
+          url: "https://hooks.example.com/catch",
+          secret: testSecret,
+          events: [event],
+          isActive: true,
+          createdAt: new Date().toISOString(),
+          simulationMode: "live",
+          failureCount: 0,
+          totalDeliveries: 0,
+        };
+        saveWebhookEndpoint(liveEndpoint);
+
+        const startedAt = performance.now();
+        await dispatchWebhookEvent(event, getWebhookSamplePayload(event));
+
+        expect(fetchSpy).toHaveBeenCalled();
+        expect(performance.now() - startedAt).toBeLessThan(3000);
+
+        const [requestUrl, requestOptions] = fetchSpy.mock.calls[0];
+        expect(requestUrl).toBe(liveEndpoint.url);
+        expect(requestOptions.method).toBe("POST");
+        expect(requestOptions.headers["Content-Type"]).toBe("application/json");
+        expect(requestOptions.headers["X-StormSale-Event"]).toBe(event);
+        expect(requestOptions.headers["X-StormSale-Signature"]).toContain("v1=");
       },
     );
 
@@ -531,7 +570,46 @@ describe("Automated Conversion Postback Webhook Engine Suite", () => {
       );
     });
 
-    it("disables a destination after five consecutive failed deliveries", async () => {
+    it("does not disable an endpoint after a single delivery with exhausted retries", async () => {
+      const endpoint: WebhookEndpoint = {
+        id: "wh_single_failure_exhausted",
+        name: "Single failed delivery endpoint",
+        url: "https://hooks.example.com/catch",
+        secret: testSecret,
+        events: ["campaign.created"],
+        isActive: true,
+        createdAt: new Date().toISOString(),
+        simulationMode: "mock_500",
+        failureCount: 0,
+        totalDeliveries: 0,
+      };
+      saveWebhookEndpoint(endpoint);
+
+      const delivery = await createDeliveryRecord(
+        endpoint,
+        "campaign.created",
+        getWebhookSamplePayload("campaign.created"),
+        2, // maxRetries = 2
+      );
+
+      // Attempt 1 -> status transitions to "retrying", endpoint failureCount remains 0
+      await dispatchDelivery(delivery.id);
+      expect(getWebhookDeliveries().find((d) => d.id === delivery.id)?.status).toBe("retrying");
+      expect(getRegisteredEndpoints().find((item) => item.id === endpoint.id)?.failureCount).toBe(
+        0,
+      );
+
+      // Attempt 2 -> retries exhausted, delivery marked "failed", endpoint failureCount increments to 1
+      await dispatchDelivery(delivery.id);
+      expect(getWebhookDeliveries().find((d) => d.id === delivery.id)?.status).toBe("failed");
+
+      const updatedEndpoint = getRegisteredEndpoints().find((item) => item.id === endpoint.id);
+      expect(updatedEndpoint?.failureCount).toBe(1);
+      expect(updatedEndpoint?.isActive).toBe(true);
+      expect(updatedEndpoint?.lastDeliveryStatus).toBe("failed");
+    });
+
+    it("disables a destination after five consecutive failed deliveries with exhausted retries", async () => {
       const endpoint: WebhookEndpoint = {
         id: "wh_repeated_failures",
         name: "Repeatedly failing endpoint",
@@ -546,13 +624,17 @@ describe("Automated Conversion Postback Webhook Engine Suite", () => {
       };
       saveWebhookEndpoint(endpoint);
 
-      for (let attempt = 0; attempt < 5; attempt += 1) {
+      for (let deliveryIndex = 0; deliveryIndex < 5; deliveryIndex += 1) {
         const delivery = await createDeliveryRecord(
           endpoint,
           "campaign.created",
           getWebhookSamplePayload("campaign.created"),
+          2, // maxRetries = 2
         );
+        // Exhaust retries for each delivery
         await dispatchDelivery(delivery.id);
+        await dispatchDelivery(delivery.id);
+        expect(getWebhookDeliveries().find((d) => d.id === delivery.id)?.status).toBe("failed");
       }
 
       const updatedEndpoint = getRegisteredEndpoints().find((item) => item.id === endpoint.id);

@@ -334,6 +334,7 @@ export interface DispatchExecutionResult {
   durationMs: number;
   signatureHeader: string;
   error?: string;
+  isPermanentFailure?: boolean;
 }
 
 /**
@@ -358,6 +359,7 @@ export async function executeHttpDispatch(
       responseBody: "",
       durationMs: Date.now() - startTime,
       error: "Webhook URL must use HTTPS and a public hostname.",
+      isPermanentFailure: true,
     };
   }
 
@@ -560,32 +562,47 @@ export async function dispatchDelivery(
     delivery.logs = [...delivery.logs, attemptLog];
     delivery.updatedAt = now;
 
+    const getFreshEndpoint = () =>
+      getRegisteredEndpoints().find((ep) => ep.id === delivery.webhookId) ?? endpoint;
+
     if (result.success) {
       delivery.status = "delivered";
       delivery.nextRetryAt = null;
 
       if (endpoint) {
+        const fresh = getFreshEndpoint()!;
         saveWebhookEndpoint({
-          ...endpoint,
+          ...fresh,
           failureCount: 0,
-          totalDeliveries: endpoint.totalDeliveries + 1,
+          totalDeliveries: fresh.totalDeliveries + 1,
           lastDeliveryStatus: "delivered",
           lastDeliveryAt: now,
         });
       }
     } else {
-      const nextFailureCount = endpoint ? endpoint.failureCount + 1 : 0;
-      const shouldDisableEndpoint =
-        endpoint !== undefined &&
-        (result.httpStatusCode === 410 || nextFailureCount >= MAX_CONSECUTIVE_FAILURES);
+      const fresh = endpoint ? getFreshEndpoint() : undefined;
 
-      if (result.httpStatusCode === 410 || shouldDisableEndpoint) {
+      if (result.isPermanentFailure) {
+        // Permanent URL rejection or invalid destination - do not retry
         delivery.status = "failed";
         delivery.nextRetryAt = null;
 
-        if (endpoint) {
+        if (fresh) {
           saveWebhookEndpoint({
-            ...endpoint,
+            ...fresh,
+            lastDeliveryStatus: "failed",
+            lastDeliveryAt: now,
+          });
+        }
+      } else if (result.httpStatusCode === 410) {
+        // Destination unsubscribed (410 Gone) - immediate disable
+        delivery.status = "failed";
+        delivery.nextRetryAt = null;
+
+        if (fresh) {
+          const nextFailureCount = fresh.failureCount + 1;
+          saveWebhookEndpoint({
+            ...fresh,
             isActive: false,
             failureCount: nextFailureCount,
             lastDeliveryStatus: "failed",
@@ -593,16 +610,16 @@ export async function dispatchDelivery(
           });
         }
       } else if (delivery.attempts < delivery.maxRetries) {
+        // Retry scheduled - do not increment endpoint failureCount until retries are exhausted
         const backoffMs = calculateBackoffDelayMs(delivery.attempts);
         const nextRetryDate = new Date(Date.now() + backoffMs);
 
         delivery.status = "retrying";
         delivery.nextRetryAt = nextRetryDate.toISOString();
 
-        if (endpoint) {
+        if (fresh) {
           saveWebhookEndpoint({
-            ...endpoint,
-            failureCount: nextFailureCount,
+            ...fresh,
             lastDeliveryStatus: "retrying",
             lastDeliveryAt: now,
           });
@@ -614,21 +631,30 @@ export async function dispatchDelivery(
           const timerId = setTimeout(() => {
             pendingRetryTimers.delete(deliveryId);
             const current = getWebhookDeliveries().find((d) => d.id === deliveryId);
-            if (current && current.status === "retrying" && current.attempts === currentAttempt) {
+            const currentEp = getRegisteredEndpoints().find((ep) => ep.id === current?.webhookId);
+            if (
+              current &&
+              current.status === "retrying" &&
+              current.attempts === currentAttempt &&
+              currentEp?.isActive !== false
+            ) {
               dispatchDelivery(deliveryId);
             }
           }, backoffMs);
           pendingRetryTimers.set(deliveryId, timerId);
         }
       } else {
+        // Retries exhausted - increment failureCount and disable if consecutive threshold reached
         delivery.status = "failed";
         delivery.nextRetryAt = null;
 
-        if (endpoint) {
+        if (fresh) {
+          const nextFailureCount = fresh.failureCount + 1;
+          const shouldDisableEndpoint = nextFailureCount >= MAX_CONSECUTIVE_FAILURES;
           saveWebhookEndpoint({
-            ...endpoint,
+            ...fresh,
             failureCount: nextFailureCount,
-            isActive: nextFailureCount < MAX_CONSECUTIVE_FAILURES,
+            isActive: shouldDisableEndpoint ? false : fresh.isActive,
             lastDeliveryStatus: "failed",
             lastDeliveryAt: now,
           });

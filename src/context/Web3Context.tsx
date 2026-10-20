@@ -392,8 +392,8 @@ export function Web3Provider({ children }: { children: ReactNode }) {
           campaign_id: res.campaignId,
           campaign_name: name,
           advertiser_address: userAddress,
-          budget: budgetXlm,
-          currency: "XLM",
+          budget: budgetAmount,
+          currency: assetCode || "XLM",
           commission_rate_percent: commissionRatePercent,
           clearing_period_seconds: clearingPeriodSecs,
           tx_hash: res.txHash,
@@ -411,10 +411,15 @@ export function Web3Provider({ children }: { children: ReactNode }) {
       const newCampaignId = Math.floor(Math.random() * 9000) + 1000;
       setTokenAllowance((prev) => Math.max(0, prev - budgetAmount));
       if (typeof window !== "undefined" && window.localStorage) {
-        const stored = window.localStorage.getItem(`mock_allowance_${userAddress}_${STELLAR_CONFIG.contractId}`);
+        const stored = window.localStorage.getItem(
+          `mock_allowance_${userAddress}_${STELLAR_CONFIG.contractId}`,
+        );
         if (stored) {
           const updated = Math.max(0, parseFloat(stored) - budgetAmount);
-          window.localStorage.setItem(`mock_allowance_${userAddress}_${STELLAR_CONFIG.contractId}`, updated.toString());
+          window.localStorage.setItem(
+            `mock_allowance_${userAddress}_${STELLAR_CONFIG.contractId}`,
+            updated.toString(),
+          );
         }
       }
       return {
@@ -457,10 +462,7 @@ export function Web3Provider({ children }: { children: ReactNode }) {
   };
 
   // Soroban: Claim Affiliate Commission
-  const claimPayoutOnChain = async (
-    campaignId: number,
-    assetCode?: SupportedEscrowAssetCode,
-  ) => {
+  const claimPayoutOnChain = async (campaignId: number, assetCode?: SupportedEscrowAssetCode) => {
     if (!userAddress) throw new Error("Wallet not connected");
 
     console.log(
