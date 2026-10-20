@@ -3,6 +3,7 @@ import { AuditorOverview } from "../components/auditor/AuditorOverview";
 import { VerifyAccess } from "../components/auditor/VerifyAccess";
 import { AuditHistory } from "../components/auditor/AuditHistory";
 import { ComplianceReport } from "../components/auditor/ComplianceReport";
+import { MerkleTreeVisualizer } from "../components/auditor/MerkleTreeVisualizer";
 import { Soc2EvidenceExport } from "../components/auditor/Soc2EvidenceExport";
 import { NetworkRiskVisualizer } from "../components/auditor/NetworkRiskVisualizer";
 import { Sidebar } from "../components/shared/Sidebar";
@@ -16,6 +17,7 @@ import {
   Eye,
   ClipboardList,
   FileCheck,
+  GitFork,
   ShieldCheck,
   Network,
   Building2,
@@ -84,10 +86,13 @@ const TenantSelector = () => {
 };
 
 const AuditorContent: React.FC<AuditorProps> = ({ onBack }) => {
+  const { org } = useAuditorTenancy();
   const [activeTab, setActiveTab] = useState("overview");
+  const [merkleTargetSaleId, setMerkleTargetSaleId] = useState<string | undefined>(undefined);
 
   const tabs = [
     { id: "overview", label: "Dashboard Overview", icon: BarChart3 },
+    { id: "merkle", label: "Merkle Tree Proofs", icon: GitFork },
     { id: "verify", label: "Verify Access", icon: Eye },
     { id: "history", label: "Audit History", icon: ClipboardList },
     { id: "compliance", label: "Compliance Report", icon: FileCheck },
@@ -95,12 +100,31 @@ const AuditorContent: React.FC<AuditorProps> = ({ onBack }) => {
     { id: "soc2", label: "SOC 2 Evidence", icon: ShieldCheck },
   ];
 
+  const handleTabChange = (tab: string) => {
+    setMerkleTargetSaleId(undefined);
+    setActiveTab(tab);
+  };
+
+  const handleViewMerkleProof = (saleId: string) => {
+    setMerkleTargetSaleId(saleId);
+    setActiveTab("merkle");
+  };
+
   const renderContent = () => {
     switch (activeTab) {
+      case "merkle":
+        return (
+          <MerkleTreeVisualizer
+            initialSaleId={merkleTargetSaleId}
+            organizationId={org.id}
+          />
+        );
       case "verify":
         return <VerifyAccess />;
       case "history":
-        return <AuditHistory />;
+        return (
+          <AuditHistory onTabChange={handleTabChange} onViewMerkleProof={handleViewMerkleProof} />
+        );
       case "compliance":
         return <ComplianceReport />;
       case "network":
@@ -108,7 +132,7 @@ const AuditorContent: React.FC<AuditorProps> = ({ onBack }) => {
       case "soc2":
         return <Soc2EvidenceExport />;
       default:
-        return <AuditorOverview onTabChange={setActiveTab} />;
+        return <AuditorOverview onTabChange={handleTabChange} />;
     }
   };
 
@@ -116,7 +140,7 @@ const AuditorContent: React.FC<AuditorProps> = ({ onBack }) => {
     <div className="flex flex-col lg:flex-row min-h-screen bg-slate-50 dark:bg-zinc-950 font-sans selection:bg-indigo-500/30">
       <Sidebar
         activeTab={activeTab}
-        onTabChange={setActiveTab}
+        onTabChange={handleTabChange}
         tabs={tabs}
         onBack={onBack}
         roleName="Auditor Enterprise"
