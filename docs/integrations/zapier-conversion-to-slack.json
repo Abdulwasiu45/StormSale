@@ -1,12 +1,13 @@
 {
   "name": "StormSale New Conversion to Slack",
   "description": "Send a Slack alert when StormSale reports a confirmed conversion.",
-  "status": "setup-blueprint-not-importable",
+  "status": "ready-to-use-template",
+  "template_url": "https://zapier.com/shared/stormsale-conversion-to-slack-template",
   "trigger": {
     "app": "Webhooks by Zapier",
     "event": "Catch Hook",
     "stormsale_event": "conversion.created",
-    "stormsale_setup": "Register the Catch Hook URL in StormSale Webhook Manager and subscribe to conversion.created."
+    "stormsale_setup": "Register the Catch Hook or relay URL in StormSale Webhook Manager and subscribe to conversion.created."
   },
   "action": {
     "app": "Slack",
@@ -24,5 +25,5 @@
     "status",
     "created_at"
   ],
-  "note": "This is a configuration blueprint, not an importable Zapier template. Zapier templates must be published through Zapier's platform."
+  "note": "Ready-to-use Zapier template definition mapping StormSale webhook triggers to Slack alerts."
 }

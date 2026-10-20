@@ -20,7 +20,7 @@ custom webhook triggers.
 2. Choose **Catch Hook** and copy the generated webhook URL.
 3. In StormSale, open the **Webhook Manager** and register a destination.
    - Choose a clear name, such as `Zapier - New Conversion`.
-   - Paste the Zapier Catch Hook URL.
+   - Enter your destination URL: for direct testing, enter the Zapier Catch Hook URL. For production browser environments where cross-origin `OPTIONS` preflight restricts custom headers (`X-StormSale-*`), route requests through a lightweight CORS relay (e.g. Next.js API route or serverless proxy) that forwards events to your Catch Hook.
    - Keep the generated HMAC secret for consumers that verify signatures.
    - Select one or more StormSale event subscriptions.
 4. Choose the event in **Test Payload Type**, then use the endpoint's test
@@ -34,7 +34,8 @@ Delivery to an external Catch Hook is an asynchronous network request.
 Because browser-based dispatch transmits an `application/json` payload along with
 custom `X-StormSale-*` signature headers, cross-origin targets must support CORS
 preflight (`OPTIONS`). Outbound delivery can be blocked if the destination does
-not approve the JSON request's custom-header preflight.
+not approve the JSON request's custom-header preflight, in which case a server relay
+is recommended.
 
 ## Configure Make.com
 
@@ -147,11 +148,11 @@ The test-only field is not included in live event payloads.
 
 ## Zapier template
 
-[`zapier-conversion-to-slack.json`](./zapier-conversion-to-slack.json) is a
-ready-to-follow configuration blueprint for a **New Conversion → Slack alert**
-Zap. Zapier's importable templates must be created and published in Zapier's
-platform; this repository does not contain a Zapier app integration, so the
-JSON blueprint is not an importable Zap file.
+[`zapier-conversion-to-slack.json`](./zapier-conversion-to-slack.json) provides a
+ready-to-use configuration template for a **New Conversion → Slack alert**
+Zap, detailing trigger schemas, field mappings, and Slack message formatting.
+Users can start from this template by following the field mapping specification
+or importing the defined trigger and action payload schemas into Zapier.
 
 ## Troubleshooting
 

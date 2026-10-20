@@ -204,6 +204,14 @@ export function saveWebhookEndpoint(endpoint: WebhookEndpoint): WebhookEndpoint[
  * Delete a webhook endpoint
  */
 export function deleteWebhookEndpoint(id: string): WebhookEndpoint[] {
+  // Cancel pending retry timers for deliveries associated with this endpoint
+  const deliveries = getWebhookDeliveries();
+  for (const delivery of deliveries) {
+    if (delivery.webhookId === id) {
+      clearPendingRetryTimer(delivery.id);
+    }
+  }
+
   const current = getRegisteredEndpoints();
   const updated = current.filter((ep) => ep.id !== id);
   memoryEndpoints = updated;
@@ -217,6 +225,15 @@ export function deleteWebhookEndpoint(id: string): WebhookEndpoint[] {
  * Toggle active status of a webhook endpoint
  */
 export function toggleWebhookEndpoint(id: string, isActive: boolean): WebhookEndpoint[] {
+  if (!isActive) {
+    const deliveries = getWebhookDeliveries();
+    for (const delivery of deliveries) {
+      if (delivery.webhookId === id) {
+        clearPendingRetryTimer(delivery.id);
+      }
+    }
+  }
+
   const current = getRegisteredEndpoints();
   const updated = current.map((ep) => (ep.id === id ? { ...ep, isActive } : ep));
   memoryEndpoints = updated;
@@ -636,7 +653,7 @@ export async function dispatchDelivery(
               current &&
               current.status === "retrying" &&
               current.attempts === currentAttempt &&
-              currentEp?.isActive !== false
+              currentEp?.isActive === true
             ) {
               dispatchDelivery(deliveryId);
             }

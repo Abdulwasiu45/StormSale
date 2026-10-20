@@ -479,7 +479,7 @@ export function Web3Provider({ children }: { children: ReactNode }) {
           payout_id: res.txHash,
           campaign_id: campaignId,
           affiliate_address: userAddress,
-          currency: (assetCode as string) || "XLM",
+          currency: (res.asset as string) || (assetCode as string) || "XLM",
           tx_hash: res.txHash,
           status: "claimed",
         });
