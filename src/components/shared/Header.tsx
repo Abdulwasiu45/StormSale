@@ -3,12 +3,27 @@ import { useWeb3 } from "../../hooks/useWeb3";
 import { useTelegram } from "../../hooks/useTelegram";
 import { ThemeToggle } from "./ThemeToggle";
 import { TerminologyTooltip, TerminologyGuideButton } from "../ui/tooltip";
-import { Wallet, Menu, X, Coins, ShieldCheck, Send, Activity } from "lucide-react";
+import {
+  Wallet,
+  Menu,
+  X,
+  Coins,
+  ShieldCheck,
+  Send,
+  Activity,
+  Network,
+  LoaderCircle,
+} from "lucide-react";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import logo from "../../assets/logo2.png";
+import { UserMenu } from "./UserMenu";
 
-export const Header = () => {
+interface HeaderProps {
+  onNavigate?: (page: string) => void;
+}
+
+export const Header = ({ onNavigate }: HeaderProps) => {
   const {
     userAddress,
     openWalletModal,
@@ -20,9 +35,23 @@ export const Header = () => {
     openMultiSigModal,
     activeRpcEndpoint,
     openRpcModal,
+    network,
+    isStellarNetwork,
+    switchToStellarNetwork,
   } = useWeb3();
   const { isTelegram, user, platform } = useTelegram();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isSwitchingNetwork, setIsSwitchingNetwork] = useState(false);
+
+  const handleNetworkSwitch = async () => {
+    if (isStellarNetwork || isSwitchingNetwork) return;
+    setIsSwitchingNetwork(true);
+    try {
+      await switchToStellarNetwork();
+    } finally {
+      setIsSwitchingNetwork(false);
+    }
+  };
 
   const formatAddress = (address: string) => `${address.slice(0, 4)}...${address.slice(-4)}`;
 
@@ -53,11 +82,7 @@ export const Header = () => {
           {isTelegram && (
             <span className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-sky-50 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-800/50">
               <Send className="w-3 h-3 text-sky-500" />
-              {user
-                ? user.username
-                  ? `@${user.username}`
-                  : user.first_name
-                : `TMA (${platform})`}
+              {user ? (user.username ? `@${user.username}` : user.first_name) : `TMA (${platform})`}
             </span>
           )}
         </div>
@@ -78,6 +103,26 @@ export const Header = () => {
         {/* Desktop Actions */}
         <div className="hidden sm:flex items-center space-x-3">
           <TerminologyGuideButton />
+          <button
+            type="button"
+            onClick={() => void handleNetworkSwitch()}
+            disabled={isStellarNetwork || isSwitchingNetwork}
+            aria-label={
+              isStellarNetwork ? `Connected to Stellar ${network}` : "Switch to Stellar network"
+            }
+            title={isStellarNetwork ? `Stellar ${network}` : "Switch wallet to the Stellar network"}
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white/70 px-2.5 text-xs font-semibold text-zinc-700 transition-colors hover:bg-slate-100 disabled:cursor-default dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          >
+            {isSwitchingNetwork ? (
+              <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+            ) : (
+              <Network
+                className={`h-3.5 w-3.5 ${isStellarNetwork ? "text-emerald-600" : "text-amber-600"}`}
+                aria-hidden="true"
+              />
+            )}
+            <span>{isStellarNetwork ? `Stellar ${network}` : "Switch to Stellar"}</span>
+          </button>
           {/* RPC Status Indicator Pill */}
           <button
             type="button"
@@ -114,17 +159,7 @@ export const Header = () => {
 
           {isConnected ? (
             <div className="flex items-center space-x-2.5">
-              <div className="flex items-center space-x-2 px-3 py-1.5 bg-slate-100 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl">
-                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-                <span className="text-xs font-mono font-semibold text-zinc-900 dark:text-white">
-                  {userAddress && formatAddress(userAddress)}
-                </span>
-                <TerminologyTooltip term="xlm" side="bottom">
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded cursor-help">
-                    {xlmBalance} XLM
-                  </span>
-                </TerminologyTooltip>
-              </div>
+              <UserMenu onNavigate={onNavigate} />
 
               {isMultiSigAccount && (
                 <Button
@@ -138,15 +173,6 @@ export const Header = () => {
                   <span>Multi-Sig ({multiSigInfo?.signers.length || 2})</span>
                 </Button>
               )}
-
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={disconnectWallet}
-                className="h-9 px-3 rounded-xl border border-slate-200 dark:border-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-900 text-zinc-700 dark:text-zinc-300 font-bold text-xs transition-all"
-              >
-                Disconnect
-              </Button>
             </div>
           ) : (
             <Button
@@ -183,6 +209,25 @@ export const Header = () => {
             <Activity className="w-4 h-4" />
           </button>
 
+          <button
+            type="button"
+            onClick={() => void handleNetworkSwitch()}
+            disabled={isStellarNetwork || isSwitchingNetwork}
+            aria-label={
+              isStellarNetwork ? `Connected to Stellar ${network}` : "Switch to Stellar network"
+            }
+            className="p-2 rounded-xl text-zinc-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:cursor-default"
+          >
+            {isSwitchingNetwork ? (
+              <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Network
+                className={`h-4 w-4 ${isStellarNetwork ? "text-emerald-600" : "text-amber-600"}`}
+                aria-hidden="true"
+              />
+            )}
+          </button>
+
           <ThemeToggle />
           {!isConnected ? (
             <Button
@@ -194,13 +239,7 @@ export const Header = () => {
               Connect
             </Button>
           ) : (
-            <button
-              onClick={openWalletModal}
-              className="px-2.5 py-1.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-500/30 rounded-xl flex items-center space-x-1.5 text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400"
-            >
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>{userAddress && formatAddress(userAddress)}</span>
-            </button>
+            <UserMenu compact onNavigate={onNavigate} />
           )}
           <button
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
