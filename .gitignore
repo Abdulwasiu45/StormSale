@@ -43,3 +43,4 @@ lens/
 test-results/
 playwright-report/
 e2e-results.json
+stats.html
