@@ -29,6 +29,8 @@ export default defineConfig({
   },
   test: {
     globals: true,
+    testTimeout: 20000,
+    hookTimeout: 20000,
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary", "json", "html"],

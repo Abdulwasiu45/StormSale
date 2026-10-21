@@ -23,6 +23,7 @@
     "test:coverage": "vitest run --coverage",
     "coverage:check": "node scripts/check-coverage.cjs",
     "security:check": "node scripts/check-security-headers.cjs",
+    "security:malware": "node scripts/malware-scanner.cjs",
     "preview": "vite preview",
     "format": "prettier --write .",
     "prepare": "husky"
