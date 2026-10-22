@@ -45,6 +45,9 @@ vi.mock("../components/auth/ProtectedRoute", () => ({
 vi.mock("../components/ui/tooltip", () => ({
   TooltipProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
+vi.mock("../components/affiliate/ShortLinkRedirect", () => ({
+  ShortLinkRedirect: () => null,
+}));
 vi.mock("../lib/branding", () => ({ loadBrandConfig: (slug: string) => ({ slug }) }));
 vi.mock("../pages/Landing", () => ({
   Landing: () => {

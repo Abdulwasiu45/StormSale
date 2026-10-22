@@ -194,12 +194,13 @@ function WalletUserMenu({
               </label>
               <input
                 id="profile-display-name"
+                name="displayName"
                 autoFocus
                 maxLength={40}
                 value={editingName}
                 onChange={(event) => setEditingName(event.target.value)}
                 placeholder="Display name"
-                className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm text-zinc-900 outline-none focus:ring-2 focus:ring-indigo-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-base sm:text-sm text-zinc-900 outline-none focus:ring-2 focus:ring-indigo-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
               />
               <div className="flex justify-end gap-2">
                 <button

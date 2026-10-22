@@ -23,6 +23,9 @@ export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
   popoverContent?: React.ReactNode;
 }
 
+/**
+ * Status and category badge component supporting semantic color variants, icons, tooltips, and interactive popovers.
+ */
 export function Badge({
   variant = "indigo",
   icon: Icon,
@@ -55,6 +58,7 @@ export function Badge({
   const badge = isInteractive ? (
     <button
       type="button"
+      tabIndex={tabIndex}
       aria-haspopup="dialog"
       aria-expanded={isPopoverOpen}
       className={badgeClassName}

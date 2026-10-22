@@ -24,6 +24,27 @@ interface HeaderProps {
   onNavigate?: (page: string) => void;
 }
 
+/**
+ * Resolves the connected wallet network verification details for Freighter or mock connectors.
+ */
+export const resolveWalletNetwork = async (
+  connectorType: string | null,
+  network: string,
+): Promise<{ network: string; isStellarNetwork: boolean } | null> => {
+  if (connectorType === "freighter") return verifyFreighterNetwork();
+  if (connectorType === "mock") {
+    const upper = network.toUpperCase();
+    return {
+      network,
+      isStellarNetwork: upper === "TESTNET" || upper === "PUBLIC",
+    };
+  }
+  return null;
+};
+
+/**
+ * Application header with wallet navigation, status indicators, and network verification controls.
+ */
 export const Header = ({ onNavigate }: HeaderProps) => {
   const {
     userAddress,
@@ -56,12 +77,7 @@ export const Header = ({ onNavigate }: HeaderProps) => {
     }
 
     const verify = async () => {
-      const result =
-        connectorType === "freighter"
-          ? await verifyFreighterNetwork()
-          : connectorType === "mock"
-            ? { network, isStellarNetwork: network.toUpperCase() === "TESTNET" }
-            : null;
+      const result = await resolveWalletNetwork(connectorType, network);
       if (!cancelled) setVerifiedNetwork(result);
     };
 
@@ -76,12 +92,7 @@ export const Header = ({ onNavigate }: HeaderProps) => {
     setIsSwitchingNetwork(true);
     setNetworkSwitchMessage(null);
     try {
-      const result =
-        connectorType === "freighter"
-          ? await verifyFreighterNetwork()
-          : connectorType === "mock"
-            ? { network, isStellarNetwork: network.toUpperCase() === "TESTNET" }
-            : null;
+      const result = await resolveWalletNetwork(connectorType, network);
       setVerifiedNetwork(result);
       if (!result) {
         setNetworkSwitchMessage(
@@ -153,30 +164,32 @@ export const Header = ({ onNavigate }: HeaderProps) => {
         {/* Desktop Actions */}
         <div className="hidden sm:flex items-center space-x-3">
           <TerminologyGuideButton />
-          <button
-            type="button"
-            onClick={() => void handleNetworkSwitch()}
-            disabled={isSwitchingNetwork}
-            aria-label={
-              verifiedNetwork?.isStellarNetwork
-                ? `Verified Stellar ${verifiedNetwork.network} wallet network`
-                : "Verify wallet network"
-            }
-            title="Switch networks in your wallet, then verify the active network here"
-            className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white/70 px-2.5 text-xs font-semibold text-zinc-700 transition-colors hover:bg-slate-100 disabled:cursor-default dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-200 dark:hover:bg-zinc-800"
-          >
-            {isSwitchingNetwork ? (
-              <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-            ) : (
-              <Network
-                className={`h-3.5 w-3.5 ${verifiedNetwork?.isStellarNetwork ? "text-emerald-600" : "text-amber-600"}`}
-                aria-hidden="true"
-              />
-            )}
-            <span>
-              {verifiedNetwork ? `Wallet: ${verifiedNetwork.network}` : "Verify wallet network"}
-            </span>
-          </button>
+          {isConnected && (
+            <button
+              type="button"
+              onClick={() => void handleNetworkSwitch()}
+              disabled={isSwitchingNetwork}
+              aria-label={
+                verifiedNetwork?.isStellarNetwork
+                  ? `Verified Stellar ${verifiedNetwork.network} wallet network`
+                  : "Verify wallet network"
+              }
+              title="Switch networks in your wallet, then verify the active network here"
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white/70 px-2.5 text-xs font-semibold text-zinc-700 transition-colors hover:bg-slate-100 disabled:cursor-default dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            >
+              {isSwitchingNetwork ? (
+                <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <Network
+                  className={`h-3.5 w-3.5 ${verifiedNetwork?.isStellarNetwork ? "text-emerald-600" : "text-amber-600"}`}
+                  aria-hidden="true"
+                />
+              )}
+              <span>
+                {verifiedNetwork ? `Wallet: ${verifiedNetwork.network}` : "Verify wallet network"}
+              </span>
+            </button>
+          )}
           {/* RPC Status Indicator Pill */}
           <button
             type="button"
@@ -263,26 +276,28 @@ export const Header = ({ onNavigate }: HeaderProps) => {
             <Activity className="w-4 h-4" />
           </button>
 
-          <button
-            type="button"
-            onClick={() => void handleNetworkSwitch()}
-            disabled={isSwitchingNetwork}
-            aria-label={
-              verifiedNetwork?.isStellarNetwork
-                ? `Verified Stellar ${verifiedNetwork.network} wallet network`
-                : "Verify wallet network"
-            }
-            className="p-2 rounded-xl text-zinc-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:cursor-default"
-          >
-            {isSwitchingNetwork ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" />
-            ) : (
-              <Network
-                className={`h-4 w-4 ${verifiedNetwork?.isStellarNetwork ? "text-emerald-600" : "text-amber-600"}`}
-                aria-hidden="true"
-              />
-            )}
-          </button>
+          {isConnected && (
+            <button
+              type="button"
+              onClick={() => void handleNetworkSwitch()}
+              disabled={isSwitchingNetwork}
+              aria-label={
+                verifiedNetwork?.isStellarNetwork
+                  ? `Verified Stellar ${verifiedNetwork.network} wallet network`
+                  : "Verify wallet network"
+              }
+              className="p-2 rounded-xl text-zinc-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:cursor-default"
+            >
+              {isSwitchingNetwork ? (
+                <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <Network
+                  className={`h-4 w-4 ${verifiedNetwork?.isStellarNetwork ? "text-emerald-600" : "text-amber-600"}`}
+                  aria-hidden="true"
+                />
+              )}
+            </button>
+          )}
 
           <ThemeToggle />
           {!isConnected ? (
