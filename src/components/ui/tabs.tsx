@@ -1,5 +1,5 @@
 import * as React from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import { cn } from "../../lib/utils";
 
 interface TabsContextValue {
@@ -48,11 +48,21 @@ export function Tabs({
   ...props
 }: TabsProps) {
   const id = React.useId();
-  const validValues = React.useMemo(() => getTabValues(children), [children]);
+  const validValuesKey = JSON.stringify(getTabValues(children));
+  const validValues = React.useMemo(() => JSON.parse(validValuesKey) as string[], [validValuesKey]);
   const fallbackValue = validValues.includes(defaultValue) ? defaultValue : (validValues[0] ?? "");
-  const preferenceKey = `stormsale.tabs:${
-    typeof window === "undefined" ? "" : window.location.pathname
-  }:${storageKey ?? queryParam ?? id}`;
+  const persistenceId = storageKey ?? queryParam;
+  const preferenceKey = persistenceId
+    ? `stormsale.tabs:${typeof window === "undefined" ? "" : window.location.pathname}:${persistenceId}`
+    : null;
+  const onValueChangeRef = React.useRef(onValueChange);
+  const valueRef = React.useRef(value);
+
+  React.useEffect(() => {
+    onValueChangeRef.current = onValueChange;
+    valueRef.current = value;
+  }, [onValueChange, value]);
+
   const [internalValue, setInternalValue] = React.useState(() => {
     if (typeof window === "undefined") return fallbackValue;
     const requestedValue = queryParam
@@ -60,7 +70,7 @@ export function Tabs({
       : null;
     if (requestedValue && validValues.includes(requestedValue)) return requestedValue;
     try {
-      const savedValue = window.localStorage.getItem(preferenceKey);
+      const savedValue = preferenceKey ? window.localStorage.getItem(preferenceKey) : null;
       return savedValue && validValues.includes(savedValue) ? savedValue : fallbackValue;
     } catch {
       return fallbackValue;
@@ -72,10 +82,10 @@ export function Tabs({
 
   const setValue = React.useCallback(
     (nextValue: string) => {
-      if (value === undefined) setInternalValue(nextValue);
-      onValueChange?.(nextValue);
+      if (valueRef.current === undefined) setInternalValue(nextValue);
+      onValueChangeRef.current?.(nextValue);
 
-      if (validValues.includes(nextValue) && typeof window !== "undefined") {
+      if (validValues.includes(nextValue) && preferenceKey && typeof window !== "undefined") {
         try {
           window.localStorage.setItem(preferenceKey, nextValue);
         } catch {
@@ -96,7 +106,7 @@ export function Tabs({
         }
       }
     },
-    [onValueChange, preferenceKey, queryParam, validValues, value],
+    [preferenceKey, queryParam, validValues],
   );
 
   React.useEffect(() => {
@@ -106,21 +116,28 @@ export function Tabs({
       const nextValue = new URLSearchParams(window.location.search).get(queryParam);
       const resolvedValue =
         nextValue && validValues.includes(nextValue) ? nextValue : fallbackValue;
-      if (value === undefined) setInternalValue(resolvedValue);
-      onValueChange?.(resolvedValue);
-      try {
-        window.localStorage.setItem(preferenceKey, resolvedValue);
-      } catch {
-        // Storage may be unavailable in private browsing contexts.
+      if (valueRef.current === undefined) setInternalValue(resolvedValue);
+      onValueChangeRef.current?.(resolvedValue);
+      if (preferenceKey) {
+        try {
+          window.localStorage.setItem(preferenceKey, resolvedValue);
+        } catch {
+          // Storage may be unavailable in private browsing contexts.
+        }
       }
     };
 
     window.addEventListener("popstate", syncFromLocation);
     return () => window.removeEventListener("popstate", syncFromLocation);
-  }, [fallbackValue, onValueChange, preferenceKey, queryParam, validValues, value]);
+  }, [fallbackValue, preferenceKey, queryParam, validValues]);
+
+  const contextValue = React.useMemo(
+    () => ({ value: activeValue, id, setValue }),
+    [activeValue, id, setValue],
+  );
 
   return (
-    <TabsContext.Provider value={{ value: activeValue, id, setValue }}>
+    <TabsContext.Provider value={contextValue}>
       <div className={className} {...props}>
         {children}
       </div>
@@ -231,28 +248,21 @@ export function TabsContent({ value, className, children, ...props }: TabsConten
   const context = useTabsContext();
   const selected = context.value === value;
 
+  if (!selected) return null;
+
   return (
-    <AnimatePresence mode="wait" initial={false}>
-      {selected && (
-        <motion.div
-          key={value}
-          role="tabpanel"
-          id={`${context.id}-panel-${value}`}
-          aria-labelledby={`${context.id}-tab-${value}`}
-          tabIndex={0}
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -4 }}
-          transition={{ duration: 0.16, ease: "easeOut" }}
-          className={cn(
-            "outline-none focus-visible:ring-2 focus-visible:ring-indigo-500",
-            className,
-          )}
-          {...props}
-        >
-          {children}
-        </motion.div>
-      )}
-    </AnimatePresence>
+    <motion.div
+      role="tabpanel"
+      id={`${context.id}-panel-${value}`}
+      aria-labelledby={`${context.id}-tab-${value}`}
+      tabIndex={0}
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.16, ease: "easeOut" }}
+      className={cn("outline-none focus-visible:ring-2 focus-visible:ring-indigo-500", className)}
+      {...props}
+    >
+      {children}
+    </motion.div>
   );
 }

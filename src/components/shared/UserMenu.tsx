@@ -22,10 +22,30 @@ interface UserMenuProps {
 }
 
 export function UserMenu({ onNavigate, compact = false }: UserMenuProps) {
-  const { userAddress, userRole, xlmBalance, updateUserRole, disconnectWallet } = useWeb3();
+  const { userAddress } = useWeb3();
+  if (!userAddress) return null;
+
+  return (
+    <WalletUserMenu
+      key={userAddress}
+      userAddress={userAddress}
+      onNavigate={onNavigate}
+      compact={compact}
+    />
+  );
+}
+
+function WalletUserMenu({
+  userAddress,
+  onNavigate,
+  compact = false,
+}: UserMenuProps & { userAddress: string }) {
+  const { userRole, xlmBalance, updateUserRole, disconnectWallet } = useWeb3();
   const profileKey = userAddress ? `stormsale.profile.displayName.${userAddress}` : null;
   const [isOpen, setIsOpen] = useState(false);
   const [isEditingName, setIsEditingName] = useState(false);
+  const [isUpdatingRole, setIsUpdatingRole] = useState(false);
+  const [roleError, setRoleError] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState(() => {
     if (!profileKey) return "";
     try {
@@ -37,6 +57,15 @@ export function UserMenu({ onNavigate, compact = false }: UserMenuProps) {
   const [editingName, setEditingName] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const pendingRoleRef = useRef<string | null>(null);
+  const roleUpdateResolverRef = useRef<((updated: boolean) => void) | null>(null);
+
+  useEffect(() => {
+    if (pendingRoleRef.current !== userRole) return;
+    pendingRoleRef.current = null;
+    roleUpdateResolverRef.current?.(true);
+    roleUpdateResolverRef.current = null;
+  }, [userRole]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -59,8 +88,6 @@ export function UserMenu({ onNavigate, compact = false }: UserMenuProps) {
     };
   }, [isOpen]);
 
-  if (!userAddress) return null;
-
   const role = ROLE_OPTIONS.find((option) => option.value === userRole);
   const shortAddress = `${userAddress.slice(0, 6)}...${userAddress.slice(-4)}`;
 
@@ -80,7 +107,38 @@ export function UserMenu({ onNavigate, compact = false }: UserMenuProps) {
   };
 
   const switchRole = async (nextRole: (typeof ROLE_OPTIONS)[number]) => {
-    if (nextRole.value !== userRole) await updateUserRole(nextRole.value);
+    setRoleError(null);
+    if (nextRole.value !== userRole) {
+      setIsUpdatingRole(true);
+      try {
+        const updated = await new Promise<boolean>((resolve) => {
+          pendingRoleRef.current = nextRole.value;
+          roleUpdateResolverRef.current = resolve;
+          void updateUserRole(nextRole.value).then(() => {
+            window.setTimeout(() => {
+              if (pendingRoleRef.current !== nextRole.value) return;
+              pendingRoleRef.current = null;
+              roleUpdateResolverRef.current = null;
+              resolve(false);
+            }, 500);
+          }).catch(() => {
+            if (pendingRoleRef.current !== nextRole.value) return;
+            pendingRoleRef.current = null;
+            roleUpdateResolverRef.current = null;
+            resolve(false);
+          });
+        });
+        if (!updated) {
+          setRoleError("Your role could not be updated. Check your connection and try again.");
+          return;
+        }
+      } catch {
+        setRoleError("Your role could not be updated. Check your connection and try again.");
+        return;
+      } finally {
+        setIsUpdatingRole(false);
+      }
+    }
     setIsOpen(false);
     onNavigate?.(nextRole.page);
   };
@@ -180,6 +238,7 @@ export function UserMenu({ onNavigate, compact = false }: UserMenuProps) {
                 key={option.value}
                 type="button"
                 onClick={() => void switchRole(option)}
+                disabled={isUpdatingRole}
                 className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm text-zinc-700 hover:bg-slate-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
               >
                 <span className="flex items-center gap-2">
@@ -190,6 +249,12 @@ export function UserMenu({ onNavigate, compact = false }: UserMenuProps) {
               </button>
             ))}
           </div>
+
+          {roleError && (
+            <p role="alert" className="mx-2 mt-1 rounded-md bg-rose-50 px-2.5 py-2 text-xs text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
+              {roleError}
+            </p>
+          )}
 
           <div className="mt-1 border-t border-slate-100 pt-1 dark:border-zinc-800">
             <button

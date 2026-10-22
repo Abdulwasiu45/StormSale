@@ -14,10 +14,11 @@ import {
   Network,
   LoaderCircle,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import logo from "../../assets/logo2.png";
 import { UserMenu } from "./UserMenu";
+import { verifyFreighterNetwork } from "../../lib/networkVerification";
 
 interface HeaderProps {
   onNavigate?: (page: string) => void;
@@ -36,18 +37,63 @@ export const Header = ({ onNavigate }: HeaderProps) => {
     activeRpcEndpoint,
     openRpcModal,
     network,
-    isStellarNetwork,
-    switchToStellarNetwork,
+    connectorType,
   } = useWeb3();
   const { isTelegram, user, platform } = useTelegram();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSwitchingNetwork, setIsSwitchingNetwork] = useState(false);
+  const [networkSwitchMessage, setNetworkSwitchMessage] = useState<string | null>(null);
+  const [verifiedNetwork, setVerifiedNetwork] = useState<{
+    network: string;
+    isStellarNetwork: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!isConnected) {
+      setVerifiedNetwork(null);
+      return;
+    }
+
+    const verify = async () => {
+      const result =
+        connectorType === "freighter"
+          ? await verifyFreighterNetwork()
+          : connectorType === "mock"
+            ? { network, isStellarNetwork: network.toUpperCase() === "TESTNET" }
+            : null;
+      if (!cancelled) setVerifiedNetwork(result);
+    };
+
+    void verify();
+    return () => {
+      cancelled = true;
+    };
+  }, [connectorType, isConnected, network]);
 
   const handleNetworkSwitch = async () => {
-    if (isStellarNetwork || isSwitchingNetwork) return;
+    if (isSwitchingNetwork) return;
     setIsSwitchingNetwork(true);
+    setNetworkSwitchMessage(null);
     try {
-      await switchToStellarNetwork();
+      const result =
+        connectorType === "freighter"
+          ? await verifyFreighterNetwork()
+          : connectorType === "mock"
+            ? { network, isStellarNetwork: network.toUpperCase() === "TESTNET" }
+            : null;
+      setVerifiedNetwork(result);
+      if (!result) {
+        setNetworkSwitchMessage("This wallet's network could not be verified. Check it in your wallet.");
+      } else if (!result.isStellarNetwork) {
+        setNetworkSwitchMessage(
+          `Wallet is on ${result.network}. Switch to Stellar in your wallet, then verify again.`,
+        );
+      } else {
+        setNetworkSwitchMessage(`Wallet network verified: ${result.network}.`);
+      }
+    } catch {
+      setNetworkSwitchMessage("Could not verify the wallet network. Check the wallet and try again.");
     } finally {
       setIsSwitchingNetwork(false);
     }
@@ -106,22 +152,28 @@ export const Header = ({ onNavigate }: HeaderProps) => {
           <button
             type="button"
             onClick={() => void handleNetworkSwitch()}
-            disabled={isStellarNetwork || isSwitchingNetwork}
+            disabled={isSwitchingNetwork}
             aria-label={
-              isStellarNetwork ? `Connected to Stellar ${network}` : "Switch to Stellar network"
+              verifiedNetwork?.isStellarNetwork
+                ? `Verified Stellar ${verifiedNetwork.network} wallet network`
+                : "Verify wallet network"
             }
-            title={isStellarNetwork ? `Stellar ${network}` : "Switch wallet to the Stellar network"}
+            title="Switch networks in your wallet, then verify the active network here"
             className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white/70 px-2.5 text-xs font-semibold text-zinc-700 transition-colors hover:bg-slate-100 disabled:cursor-default dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-200 dark:hover:bg-zinc-800"
           >
             {isSwitchingNetwork ? (
               <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
             ) : (
               <Network
-                className={`h-3.5 w-3.5 ${isStellarNetwork ? "text-emerald-600" : "text-amber-600"}`}
+                className={`h-3.5 w-3.5 ${verifiedNetwork?.isStellarNetwork ? "text-emerald-600" : "text-amber-600"}`}
                 aria-hidden="true"
               />
             )}
-            <span>{isStellarNetwork ? `Stellar ${network}` : "Switch to Stellar"}</span>
+            <span>
+              {verifiedNetwork
+                ? `Wallet: ${verifiedNetwork.network}`
+                : "Verify wallet network"}
+            </span>
           </button>
           {/* RPC Status Indicator Pill */}
           <button
@@ -212,9 +264,11 @@ export const Header = ({ onNavigate }: HeaderProps) => {
           <button
             type="button"
             onClick={() => void handleNetworkSwitch()}
-            disabled={isStellarNetwork || isSwitchingNetwork}
+            disabled={isSwitchingNetwork}
             aria-label={
-              isStellarNetwork ? `Connected to Stellar ${network}` : "Switch to Stellar network"
+              verifiedNetwork?.isStellarNetwork
+                ? `Verified Stellar ${verifiedNetwork.network} wallet network`
+                : "Verify wallet network"
             }
             className="p-2 rounded-xl text-zinc-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 disabled:cursor-default"
           >
@@ -222,7 +276,7 @@ export const Header = ({ onNavigate }: HeaderProps) => {
               <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" />
             ) : (
               <Network
-                className={`h-4 w-4 ${isStellarNetwork ? "text-emerald-600" : "text-amber-600"}`}
+                className={`h-4 w-4 ${verifiedNetwork?.isStellarNetwork ? "text-emerald-600" : "text-amber-600"}`}
                 aria-hidden="true"
               />
             )}
@@ -250,6 +304,15 @@ export const Header = ({ onNavigate }: HeaderProps) => {
           </button>
         </div>
       </div>
+
+      {networkSwitchMessage && (
+        <p
+          role="status"
+          className="border-t border-slate-100 bg-slate-50 px-4 py-2 text-center text-xs text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+        >
+          {networkSwitchMessage}
+        </p>
+      )}
 
       {/* Mobile Dropdown Navigation Drawer */}
       <AnimatePresence>
