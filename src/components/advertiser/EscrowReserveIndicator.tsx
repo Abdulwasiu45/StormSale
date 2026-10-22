@@ -70,7 +70,9 @@ export const EscrowReserveIndicator: React.FC<EscrowReserveIndicatorProps> = ({
         </div>
 
         <Badge
-          variant={warningLevel === "critical" ? "rose" : warningLevel === "warning" ? "amber" : "emerald"}
+          variant={
+            warningLevel === "critical" ? "rose" : warningLevel === "warning" ? "amber" : "emerald"
+          }
           icon={Icon}
           role={onOpenSettings ? undefined : "status"}
           aria-label={`Escrow status: ${badge.label}`}
@@ -83,7 +85,9 @@ export const EscrowReserveIndicator: React.FC<EscrowReserveIndicatorProps> = ({
             onOpenSettings ? (
               <div className="space-y-2">
                 <p className="font-semibold">{badge.label}</p>
-                <p>{currentBalanceXlm.toLocaleString()} XLM remaining ({remainingPercent}%).</p>
+                <p>
+                  {currentBalanceXlm.toLocaleString()} XLM remaining ({remainingPercent}%).
+                </p>
                 <button
                   type="button"
                   onClick={onOpenSettings}

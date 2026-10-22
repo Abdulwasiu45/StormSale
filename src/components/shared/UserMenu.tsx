@@ -114,19 +114,21 @@ function WalletUserMenu({
         const updated = await new Promise<boolean>((resolve) => {
           pendingRoleRef.current = nextRole.value;
           roleUpdateResolverRef.current = resolve;
-          void updateUserRole(nextRole.value).then(() => {
-            window.setTimeout(() => {
+          void updateUserRole(nextRole.value)
+            .then(() => {
+              window.setTimeout(() => {
+                if (pendingRoleRef.current !== nextRole.value) return;
+                pendingRoleRef.current = null;
+                roleUpdateResolverRef.current = null;
+                resolve(false);
+              }, 500);
+            })
+            .catch(() => {
               if (pendingRoleRef.current !== nextRole.value) return;
               pendingRoleRef.current = null;
               roleUpdateResolverRef.current = null;
               resolve(false);
-            }, 500);
-          }).catch(() => {
-            if (pendingRoleRef.current !== nextRole.value) return;
-            pendingRoleRef.current = null;
-            roleUpdateResolverRef.current = null;
-            resolve(false);
-          });
+            });
         });
         if (!updated) {
           setRoleError("Your role could not be updated. Check your connection and try again.");
@@ -251,7 +253,10 @@ function WalletUserMenu({
           </div>
 
           {roleError && (
-            <p role="alert" className="mx-2 mt-1 rounded-md bg-rose-50 px-2.5 py-2 text-xs text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
+            <p
+              role="alert"
+              className="mx-2 mt-1 rounded-md bg-rose-50 px-2.5 py-2 text-xs text-rose-700 dark:bg-rose-950/40 dark:text-rose-300"
+            >
               {roleError}
             </p>
           )}

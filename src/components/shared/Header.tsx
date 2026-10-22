@@ -84,7 +84,9 @@ export const Header = ({ onNavigate }: HeaderProps) => {
             : null;
       setVerifiedNetwork(result);
       if (!result) {
-        setNetworkSwitchMessage("This wallet's network could not be verified. Check it in your wallet.");
+        setNetworkSwitchMessage(
+          "This wallet's network could not be verified. Check it in your wallet.",
+        );
       } else if (!result.isStellarNetwork) {
         setNetworkSwitchMessage(
           `Wallet is on ${result.network}. Switch to Stellar in your wallet, then verify again.`,
@@ -93,7 +95,9 @@ export const Header = ({ onNavigate }: HeaderProps) => {
         setNetworkSwitchMessage(`Wallet network verified: ${result.network}.`);
       }
     } catch {
-      setNetworkSwitchMessage("Could not verify the wallet network. Check the wallet and try again.");
+      setNetworkSwitchMessage(
+        "Could not verify the wallet network. Check the wallet and try again.",
+      );
     } finally {
       setIsSwitchingNetwork(false);
     }
@@ -170,9 +174,7 @@ export const Header = ({ onNavigate }: HeaderProps) => {
               />
             )}
             <span>
-              {verifiedNetwork
-                ? `Wallet: ${verifiedNetwork.network}`
-                : "Verify wallet network"}
+              {verifiedNetwork ? `Wallet: ${verifiedNetwork.network}` : "Verify wallet network"}
             </span>
           </button>
           {/* RPC Status Indicator Pill */}

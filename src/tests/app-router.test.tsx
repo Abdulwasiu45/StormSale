@@ -93,6 +93,7 @@ vi.mock("../components/shared/BrandedCampaignView", () => ({
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
 
@@ -161,9 +162,18 @@ describe("App router integration", () => {
   it("shows the error boundary fallback when a page throws", async () => {
     mockState.throwLanding = true;
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const reload = vi.fn();
+    const testWindow = Object.create(window) as Window;
+    Object.defineProperty(testWindow, "location", {
+      configurable: true,
+      value: { ...window.location, reload },
+    });
+    vi.stubGlobal("window", testWindow);
+
     render(<App />);
     expect(await screen.findByText("Something went wrong")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    expect(reload).toHaveBeenCalledOnce();
     expect(errorSpy).toHaveBeenCalled();
   });
 });

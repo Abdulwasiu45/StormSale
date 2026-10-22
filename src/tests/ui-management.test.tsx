@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Sparkles } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
@@ -176,10 +176,7 @@ describe("UI management components", () => {
   it("exposes interactive badge content through a keyboard-operable popover", () => {
     render(
       <TooltipProvider>
-        <Badge
-          variant="amber"
-          popoverContent={<button type="button">Open settings</button>}
-        >
+        <Badge variant="amber" popoverContent={<button type="button">Open settings</button>}>
           Review
         </Badge>
       </TooltipProvider>,
@@ -232,19 +229,15 @@ describe("UI management components", () => {
     } as const;
     render(
       <TooltipProvider>
-        <EscrowReserveIndicator
-          status={status}
-          onQuickRefill={vi.fn()}
-          isRefilling
-        />
+        <EscrowReserveIndicator status={status} onQuickRefill={vi.fn()} isRefilling />
       </TooltipProvider>,
     );
 
     expect(screen.getByRole("status", { name: "Escrow status: Low Reserve (< 15%)" })).toBeTruthy();
     expect(screen.getByRole("progressbar").className).toContain("bg-amber-500");
-    expect((screen.getByRole("button", { name: "1-Click Refill" }) as HTMLButtonElement).disabled).toBe(
-      true,
-    );
+    expect(
+      (screen.getByRole("button", { name: "1-Click Refill" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
   });
 
   it("renders the healthy reserve state without a refill action", () => {
@@ -364,15 +357,13 @@ describe("UI management components", () => {
     mockWeb3.multiSigInfo = { signers: ["G1", "G2"] };
     mockWeb3.isStellarNetwork = false;
     mockVerifyFreighterNetwork.mockResolvedValue({ network: "PUBLIC", isStellarNetwork: false });
-    render(
+    const view = render(
       <TooltipProvider>
         <Header onNavigate={vi.fn()} />
       </TooltipProvider>,
     );
 
-    fireEvent.click(
-      screen.getAllByRole("button", { name: "Verify wallet network" })[0],
-    );
+    fireEvent.click(screen.getAllByRole("button", { name: "Verify wallet network" })[0]);
     await waitFor(() => expect(mockVerifyFreighterNetwork).toHaveBeenCalled());
     expect(screen.getByRole("status").textContent).toContain("Wallet is on PUBLIC");
     expect(screen.getByRole("button", { name: /Multi-Sig \(2\)/ })).toBeTruthy();
@@ -389,9 +380,17 @@ describe("UI management components", () => {
     fireEvent.click(screen.getByRole("button", { name: "Toggle Menu" }));
     fireEvent.click(screen.getByRole("button", { name: "Disconnect Wallet" }));
     expect(mockWeb3.disconnectWallet).toHaveBeenCalledOnce();
-    fireEvent.click(screen.getByRole("button", { name: "Toggle Menu" }));
-    expect(screen.getByText("CONNECTED WALLET")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Disconnect Wallet" })).toBeTruthy();
+    act(() => {
+      mockWeb3.isConnected = false;
+      mockWeb3.userAddress = null;
+      view.rerender(
+        <TooltipProvider>
+          <Header onNavigate={vi.fn()} />
+        </TooltipProvider>,
+      );
+    });
+    await waitFor(() => expect(screen.queryByText("CONNECTED WALLET")).toBeNull());
+    expect(screen.queryByRole("button", { name: "Disconnect Wallet" })).toBeNull();
   });
 
   it("shows connect actions when disconnected in both desktop and mobile navigation", () => {

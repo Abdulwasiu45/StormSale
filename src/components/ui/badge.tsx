@@ -40,7 +40,8 @@ export function Badge({
   const badgeClassName = cn(
     "inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold leading-none",
     badgeVariants[variant],
-    tooltip && "cursor-help focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500",
+    tooltip &&
+      "cursor-help focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500",
     isInteractive && "cursor-pointer",
     className,
   );
