@@ -201,7 +201,7 @@ const ToastItem: React.FC<ToastItemProps> = ({ notification, onDismiss }) => {
 
   const [remainingTime, setRemainingTime] = useState<number>(duration);
   const [isPaused, setIsPaused] = useState<boolean>(false);
-  const startTimeRef = useRef<number>(0);
+  const startTimeRef = useRef<number>(Date.now());
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Auto-dismiss countdown with hover-to-pause

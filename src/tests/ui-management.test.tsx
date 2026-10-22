@@ -6,17 +6,53 @@ import { Badge } from "../components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { TooltipProvider } from "../components/ui/tooltip";
 import { UserMenu } from "../components/shared/UserMenu";
+import { Header } from "../components/shared/Header";
 
-const mockWeb3 = {
+const mockWeb3: {
+  userAddress: string | null;
+  userRole: string | null;
+  xlmBalance: string;
+  isConnected: boolean;
+  isMultiSigAccount: boolean;
+  multiSigInfo: { signers: string[] } | null;
+  activeRpcEndpoint: {
+    name: string;
+    status: "healthy" | "degraded" | "unreachable";
+    type: "primary" | "local" | "blockdag";
+    latencyMs: number | null;
+  };
+  network: string;
+  isStellarNetwork: boolean;
+  updateUserRole: ReturnType<typeof vi.fn>;
+  disconnectWallet: ReturnType<typeof vi.fn>;
+  openWalletModal: ReturnType<typeof vi.fn>;
+  openMultiSigModal: ReturnType<typeof vi.fn>;
+  openRpcModal: ReturnType<typeof vi.fn>;
+  switchToStellarNetwork: ReturnType<typeof vi.fn>;
+} = {
   userAddress: "GABCDEF1234567890",
   userRole: "ADVERTISER",
   xlmBalance: "12.50",
+  isConnected: true,
+  isMultiSigAccount: false,
+  multiSigInfo: null,
+  activeRpcEndpoint: { name: "Primary RPC", status: "healthy", type: "primary", latencyMs: 28 },
+  network: "TESTNET",
+  isStellarNetwork: true,
   updateUserRole: vi.fn().mockResolvedValue(undefined),
   disconnectWallet: vi.fn(),
+  openWalletModal: vi.fn(),
+  openMultiSigModal: vi.fn(),
+  openRpcModal: vi.fn(),
+  switchToStellarNetwork: vi.fn().mockResolvedValue(true),
 };
 
 vi.mock("../hooks/useWeb3", () => ({
   useWeb3: () => mockWeb3,
+}));
+
+vi.mock("../hooks/useTelegram", () => ({
+  useTelegram: () => ({ isTelegram: false, user: null, platform: "web" }),
 }));
 
 afterEach(() => {
@@ -27,6 +63,22 @@ afterEach(() => {
 beforeEach(() => {
   window.history.replaceState({}, "", "/");
   window.localStorage.clear();
+  Object.assign(mockWeb3, {
+    userAddress: "GABCDEF1234567890",
+    userRole: "ADVERTISER",
+    xlmBalance: "12.50",
+    isConnected: true,
+    isMultiSigAccount: false,
+    multiSigInfo: null,
+    activeRpcEndpoint: {
+      name: "Primary RPC",
+      status: "healthy",
+      type: "primary",
+      latencyMs: 28,
+    },
+    network: "TESTNET",
+    isStellarNetwork: true,
+  });
 });
 
 function renderTabs(props: { queryParam?: string; storageKey?: string } = {}) {
@@ -101,5 +153,83 @@ describe("UI management components", () => {
     fireEvent.click(screen.getByRole("button", { name: /Affiliate$/ }));
     expect(mockWeb3.updateUserRole).toHaveBeenCalledWith("AFFILIATE");
     await waitFor(() => expect(onNavigate).toHaveBeenCalledWith("affiliate"));
+  });
+
+  it("edits and persists the wallet-local profile name", () => {
+    render(<UserMenu />);
+    fireEvent.click(screen.getByRole("button", { name: /Account menu/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit local profile name" }));
+    fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "Morgan" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(window.localStorage.getItem("stormsale.profile.displayName.GABCDEF1234567890")).toBe(
+      "Morgan",
+    );
+    expect(screen.getByRole("button", { name: "Account menu for Morgan" })).toBeTruthy();
+  });
+
+  it("supports role dashboard navigation and disconnects the wallet", () => {
+    const onNavigate = vi.fn();
+    mockWeb3.userRole = "AUDITOR";
+    render(<UserMenu onNavigate={onNavigate} />);
+    fireEvent.click(screen.getByRole("button", { name: /Account menu/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Auditor dashboard" }));
+    expect(onNavigate).toHaveBeenCalledWith("auditor");
+
+    fireEvent.click(screen.getByRole("button", { name: /Account menu/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect wallet" }));
+    expect(mockWeb3.disconnectWallet).toHaveBeenCalledOnce();
+  });
+
+  it("does not render an account menu without a connected address", () => {
+    mockWeb3.userAddress = null;
+    const { container } = render(<UserMenu />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("renders connected header controls and switches to Stellar when prompted", async () => {
+    mockWeb3.isMultiSigAccount = true;
+    mockWeb3.multiSigInfo = { signers: ["G1", "G2"] };
+    mockWeb3.isStellarNetwork = false;
+    render(
+      <TooltipProvider>
+        <Header onNavigate={vi.fn()} />
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Switch to Stellar network" })[0]);
+    await waitFor(() => expect(mockWeb3.switchToStellarNetwork).toHaveBeenCalledOnce());
+    expect(screen.getByRole("button", { name: /Multi-Sig \(2\)/ })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle Menu" }));
+    expect(screen.getByText("CONNECTED WALLET")).toBeTruthy();
+    fireEvent.click(screen.getByText("Multi-Sig Escrow Approvals").closest("button")!);
+    expect(mockWeb3.openMultiSigModal).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle Menu" }));
+    fireEvent.click(screen.getAllByRole("link", { name: "About Us" })[1]);
+    await waitFor(() => expect(screen.queryByText("CONNECTED WALLET")).toBeNull());
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle Menu" }));
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect Wallet" }));
+    expect(mockWeb3.disconnectWallet).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Toggle Menu" }));
+    expect(screen.getByText("CONNECTED WALLET")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Disconnect Wallet" })).toBeTruthy();
+  });
+
+  it("shows connect actions when disconnected in both desktop and mobile navigation", () => {
+    mockWeb3.isConnected = false;
+    render(
+      <TooltipProvider>
+        <Header />
+      </TooltipProvider>,
+    );
+    fireEvent.click(screen.getAllByRole("button", { name: "Connect Wallet" })[0]);
+    expect(mockWeb3.openWalletModal).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle Menu" }));
+    fireEvent.click(screen.getByRole("button", { name: "Select Stellar Wallet" }));
+    expect(mockWeb3.openWalletModal).toHaveBeenCalledTimes(2);
   });
 });
